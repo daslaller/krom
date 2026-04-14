@@ -34,6 +34,8 @@ dependencies:
   flutter_highlight: ^0.7.0
   highlight: ^0.7.0
   path: ^1.9.0
+  lsp_client:
+    path: packages/lsp_client
 
 dev_dependencies:
   flutter_test:

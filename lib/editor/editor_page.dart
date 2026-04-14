@@ -179,7 +179,16 @@ class _EditorPageState extends State<EditorPage> {
     // Convert the file URI returned by the LSP server back to a local path.
     final targetPath = Uri.parse(loc.uri).toFilePath();
     await _openFile(targetPath);
-    // TODO(phase2): scroll to loc.range.start.line after open
+
+    // Move cursor to the definition position.
+    final targetTab = _tabController.tabs
+        .firstWhere((t) => t.filePath == targetPath);
+    final targetOffset = _lineCharToOffset(
+      targetTab.codeController.fullText,
+      loc.range.start.line,
+      loc.range.start.character,
+    );
+    targetTab.codeController.setCursor(targetOffset);
   }
 
   static (int line, int character) _offsetToLineChar(String text, int offset) {
@@ -193,6 +202,17 @@ class _EditorPageState extends State<EditorPage> {
       }
     }
     return (line, end - lineStart);
+  }
+
+  static int _lineCharToOffset(String text, int targetLine, int targetChar) {
+    var line = 0;
+    for (var i = 0; i < text.length; i++) {
+      if (line == targetLine) {
+        return (i + targetChar).clamp(0, text.length);
+      }
+      if (text[i] == '\n') line++;
+    }
+    return text.length;
   }
 
   @override

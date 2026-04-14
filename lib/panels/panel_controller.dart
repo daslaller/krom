@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-enum PanelType { fileTree }
+enum PanelType { fileTree, outline }
 
 class PanelController extends ChangeNotifier {
   PanelType? _activePanel;

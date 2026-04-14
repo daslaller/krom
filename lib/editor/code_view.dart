@@ -20,7 +20,7 @@ class CodeView extends StatelessWidget {
         textStyle: KromTypography.code(),
         gutterStyle: GutterStyle(
           showLineNumbers: true,
-          showFoldingHandles: false,
+          showFoldingHandles: true,
           showErrors: false,
           width: 64,
           textStyle: KromTypography.code(color: KromColors.textDisabled),

@@ -8,14 +8,14 @@ import 'settings_service.dart';
 
 /// Bridges the LSP client package and the Flutter editor.
 ///
-/// Manages one LspClient per language server and exposes per-file diagnostics
-/// as streams of flutter_code_editor [Issue] lists.
+/// Manages one [LspClient] per configured language server and exposes
+/// per-file diagnostics as streams of flutter_code_editor [Issue] lists.
 class LspService {
   LspService(this._settings);
 
   final SettingsService _settings;
 
-  LspClient? _dartClient;
+  final Map<String, LspClient> _clients = {};
 
   // file URI string → broadcast StreamController<List<Issue>>
   final Map<String, StreamController<List<Issue>>> _diagStreams = {};
@@ -23,41 +23,53 @@ class LspService {
   // file path → current document version
   final Map<String, int> _versions = {};
 
-  // Pending debounced change
-  Timer? _changeDebounce;
-  String? _pendingPath;
-  String? _pendingContent;
-  String? _pendingLanguageId;
+  // Pending debounced change per file
+  final Map<String, Timer> _changeDebounces = {};
+  final Map<String, String> _pendingContent = {};
+  final Map<String, String> _pendingLanguageId = {};
 
-  bool get isAvailable => _dartClient != null;
+  bool get isAvailable => _clients.isNotEmpty;
+
+  Iterable<String> get activeLanguages => _clients.keys;
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
   Future<void> initialize(String workspaceRoot) async {
-    if (_dartClient != null) return;
+    final rootUri = Uri.directory(workspaceRoot).toString();
+    final languageIds = _settings.configuredLanguageIds();
 
-    final cmd = _settings.serverCommand('dart');
-    if (cmd.isEmpty) return;
+    for (final languageId in languageIds) {
+      if (_clients.containsKey(languageId)) continue;
 
-    try {
-      _dartClient = await LspClient.start(
-        serverCommand: cmd,
-        rootUri: Uri.directory(workspaceRoot).toString(),
-      );
-      _dartClient!.diagnostics.listen(_onDiagnostics);
-    } catch (_) {
-      // Language server not available — degrade gracefully.
+      final cmd = _settings.serverCommand(languageId);
+      if (cmd.isEmpty) continue;
+
+      try {
+        final client = await LspClient.start(
+          serverCommand: cmd,
+          rootUri: rootUri,
+        );
+        client.diagnostics.listen(_onDiagnostics);
+        _clients[languageId] = client;
+      } catch (_) {
+        // Language server not available — degrade gracefully.
+      }
     }
   }
 
   Future<void> dispose() async {
-    _changeDebounce?.cancel();
+    for (final timer in _changeDebounces.values) {
+      timer.cancel();
+    }
+    _changeDebounces.clear();
     for (final sc in _diagStreams.values) {
       await sc.close();
     }
     _diagStreams.clear();
-    await _dartClient?.shutdown();
-    _dartClient = null;
+    for (final client in _clients.values) {
+      await client.shutdown();
+    }
+    _clients.clear();
   }
 
   // ── Document lifecycle ────────────────────────────────────────────────────
@@ -83,15 +95,20 @@ class LspService {
 
   /// Debounced (300 ms) change notification — call on every keystroke.
   void scheduleChange(String filePath, String languageId, String content) {
-    _pendingPath = filePath;
-    _pendingContent = content;
-    _pendingLanguageId = languageId;
-    _changeDebounce?.cancel();
-    _changeDebounce = Timer(const Duration(milliseconds: 300), _flushChange);
+    _pendingContent[filePath] = content;
+    _pendingLanguageId[filePath] = languageId;
+    _changeDebounces[filePath]?.cancel();
+    _changeDebounces[filePath] = Timer(
+      const Duration(milliseconds: 300),
+      () => _flushChange(filePath),
+    );
   }
 
   Future<void> closeDocument(String filePath, String languageId) async {
-    _changeDebounce?.cancel();
+    _changeDebounces.remove(filePath)?.cancel();
+    _pendingContent.remove(filePath);
+    _pendingLanguageId.remove(filePath);
+
     final client = _clientFor(languageId);
     if (client != null) {
       await client.closeDocument(uri: Uri.file(filePath));
@@ -104,7 +121,6 @@ class LspService {
 
   // ── Queries ───────────────────────────────────────────────────────────────
 
-  /// Stream of [Issue] lists for [filePath] (push from LSP server).
   Stream<List<Issue>> diagnosticsFor(String filePath) =>
       _ensureStream(filePath).stream;
 
@@ -150,13 +166,53 @@ class LspService {
     );
   }
 
+  Future<List<LspLocation>> getReferences(
+    String filePath,
+    int line,
+    int character,
+  ) async {
+    final client = _clientForPath(filePath);
+    if (client == null) return const [];
+    return client.getReferences(
+      uri: Uri.file(filePath),
+      line: line,
+      character: character,
+    );
+  }
+
+  Future<String?> formatDocumentText(String filePath, String text) async {
+    final client = _clientForPath(filePath);
+    if (client == null) return null;
+
+    // Ensure server has latest content before formatting.
+    final languageId = languageIdFromPath(filePath);
+    if (languageId == null) return null;
+
+    final version = (_versions[filePath] ?? 1) + 1;
+    _versions[filePath] = version;
+    await client.changeDocument(
+      uri: Uri.file(filePath),
+      text: text,
+      version: version,
+    );
+
+    final edits = await client.formatDocument(uri: Uri.file(filePath));
+    if (edits.isEmpty) return text;
+    return applyTextEdits(text, edits);
+  }
+
+  Future<List<LspDocumentSymbol>> getDocumentSymbols(String filePath) async {
+    final client = _clientForPath(filePath);
+    if (client == null) return const [];
+    return client.getDocumentSymbols(uri: Uri.file(filePath));
+  }
+
   // ── Internal ──────────────────────────────────────────────────────────────
 
-  void _flushChange() {
-    final path = _pendingPath;
-    final content = _pendingContent;
-    final languageId = _pendingLanguageId;
-    if (path == null || content == null || languageId == null) return;
+  void _flushChange(String path) {
+    final content = _pendingContent[path];
+    final languageId = _pendingLanguageId[path];
+    if (content == null || languageId == null) return;
 
     final client = _clientFor(languageId);
     if (client == null) return;
@@ -186,8 +242,7 @@ class LspService {
         },
       );
 
-  LspClient? _clientFor(String languageId) =>
-      languageId == 'dart' ? _dartClient : null;
+  LspClient? _clientFor(String languageId) => _clients[languageId];
 
   LspClient? _clientForPath(String filePath) =>
       _clientFor(languageIdFromPath(filePath) ?? '');

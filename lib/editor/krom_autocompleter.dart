@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
 
 import '../services/lsp_service.dart';
+import '../syntax/tree_sitter_registry.dart';
 
 /// Feeds LSP completions into a [CodeController]'s built-in [Autocompleter].
 ///
@@ -32,7 +33,7 @@ class KromAutocompleter {
     if (offset < 0) return;
 
     final text = controller.fullText;
-    final (line, character) = _offsetToLineChar(text, offset);
+    final (line, character) = offsetToLineChar(text, offset);
 
     final items = await _lspService.getCompletions(_filePath, line, character);
     if (items.isEmpty) return;
@@ -43,18 +44,5 @@ class KromAutocompleter {
 
   void dispose() {
     _debounce?.cancel();
-  }
-
-  static (int line, int character) _offsetToLineChar(String text, int offset) {
-    var line = 0;
-    var lineStart = 0;
-    final end = offset.clamp(0, text.length);
-    for (var i = 0; i < end; i++) {
-      if (text[i] == '\n') {
-        line++;
-        lineStart = i + 1;
-      }
-    }
-    return (line, end - lineStart);
   }
 }

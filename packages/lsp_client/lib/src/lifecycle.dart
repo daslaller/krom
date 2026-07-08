@@ -4,13 +4,23 @@ import 'dart:io';
 import 'completion.dart';
 import 'definition.dart';
 import 'diagnostics.dart';
+import 'formatting.dart';
 import 'hover.dart';
+import 'references.dart';
+import 'rename.dart';
+import 'symbols.dart';
+import 'text_sync.dart';
 import 'transport.dart';
 
 export 'completion.dart';
 export 'definition.dart';
 export 'diagnostics.dart';
+export 'formatting.dart';
 export 'hover.dart';
+export 'references.dart';
+export 'rename.dart';
+export 'symbols.dart';
+export 'text_sync.dart';
 
 /// Full LSP client: lifecycle, text sync, diagnostics, completion, hover, definition.
 ///
@@ -33,6 +43,12 @@ class LspClient {
   final Map<int, Completer<Map<String, dynamic>?>> _pending = {};
   final StreamController<LspDiagnosticsParams> _diagnostics =
       StreamController.broadcast();
+
+  /// Sync kind negotiated during initialize (defaults to full).
+  TextDocumentSyncKind syncKind = TextDocumentSyncKind.full;
+
+  /// Last known document text per URI (for incremental sync).
+  final Map<String, String> _documentTexts = {};
 
   /// Server-pushed diagnostic notifications.
   Stream<LspDiagnosticsParams> get diagnostics => _diagnostics.stream;
@@ -58,6 +74,7 @@ class LspClient {
     required String text,
     int version = 1,
   }) async {
+    _documentTexts[uri.toString()] = text;
     _notify('textDocument/didOpen', {
       'textDocument': {
         'uri': uri.toString(),
@@ -73,6 +90,19 @@ class LspClient {
     required String text,
     required int version,
   }) async {
+    final uriStr = uri.toString();
+    if (syncKind == TextDocumentSyncKind.incremental) {
+      final oldText = _documentTexts[uriStr] ?? '';
+      final change = computeTextChange(oldText, text);
+      _documentTexts[uriStr] = text;
+      _notify('textDocument/didChange', {
+        'textDocument': {'uri': uriStr, 'version': version},
+        'contentChanges': [change.toJson()],
+      });
+      return;
+    }
+
+    _documentTexts[uriStr] = text;
     _notify('textDocument/didChange', {
       'textDocument': {'uri': uri.toString(), 'version': version},
       'contentChanges': [
@@ -82,6 +112,7 @@ class LspClient {
   }
 
   Future<void> closeDocument({required Uri uri}) async {
+    _documentTexts.remove(uri.toString());
     _notify('textDocument/didClose', {
       'textDocument': {'uri': uri.toString()},
     });
@@ -152,11 +183,89 @@ class LspClient {
     return [LspLocation.fromJson(result as Map<String, dynamic>)];
   }
 
+  // ── References ────────────────────────────────────────────────────────────
+
+  Future<List<LspLocation>> getReferences({
+    required Uri uri,
+    required int line,
+    required int character,
+    bool includeDeclaration = true,
+  }) async {
+    final response = await _request('textDocument/references', {
+      'textDocument': {'uri': uri.toString()},
+      'position': {'line': line, 'character': character},
+      'context': {'includeDeclaration': includeDeclaration},
+    });
+    return LspReferenceResult.parseResult(response?['result']);
+  }
+
+  // ── Formatting ──────────────────────────────────────────────────────────
+
+  Future<List<LspTextEdit>> formatDocument({required Uri uri}) async {
+    final response = await _request('textDocument/formatting', {
+      'textDocument': {'uri': uri.toString()},
+      'options': {
+        'tabSize': 2,
+        'insertSpaces': true,
+      },
+    });
+    return LspTextEdit.parseResult(response?['result']);
+  }
+
+  // ── Rename ────────────────────────────────────────────────────────────────
+
+  Future<LspPrepareRenameResult?> prepareRename({
+    required Uri uri,
+    required int line,
+    required int character,
+  }) async {
+    final response = await _request('textDocument/prepareRename', {
+      'textDocument': {'uri': uri.toString()},
+      'position': {'line': line, 'character': character},
+    });
+    return LspPrepareRenameResult.parseResult(response?['result']);
+  }
+
+  Future<LspWorkspaceEdit?> rename({
+    required Uri uri,
+    required int line,
+    required int character,
+    required String newName,
+  }) async {
+    final response = await _request('textDocument/rename', {
+      'textDocument': {'uri': uri.toString()},
+      'position': {'line': line, 'character': character},
+      'newName': newName,
+    });
+    final result = response?['result'];
+    if (result == null) return null;
+    return LspWorkspaceEdit.fromJson(result as Map<String, dynamic>);
+  }
+
+  // ── Symbols ───────────────────────────────────────────────────────────────
+
+  Future<List<LspDocumentSymbol>> getDocumentSymbols({
+    required Uri uri,
+  }) async {
+    final response = await _request('textDocument/documentSymbol', {
+      'textDocument': {'uri': uri.toString()},
+    });
+    return LspDocumentSymbol.parseResult(response?['result']);
+  }
+
+  Future<List<LspWorkspaceSymbol>> getWorkspaceSymbols({
+    required String query,
+  }) async {
+    final response = await _request('workspace/symbol', {'query': query});
+    return LspWorkspaceSymbol.parseResult(response?['result']);
+  }
+
   // ── Shutdown ──────────────────────────────────────────────────────────────
 
   Future<void> shutdown() async {
     await _request('shutdown', null);
     _notify('exit', null);
+    _documentTexts.clear();
     // Cancel all pending requests before disposing.
     for (final c in _pending.values) {
       if (!c.isCompleted) c.complete(null);
@@ -169,26 +278,56 @@ class LspClient {
   // ── Internal ──────────────────────────────────────────────────────────────
 
   Future<void> _initialize(String rootUri) async {
-    await _request('initialize', {
+    final response = await _request('initialize', {
       'processId': pid,
       'rootUri': rootUri,
       'capabilities': {
         'textDocument': {
           'synchronization': {
             'openClose': true,
-            'change': 1, // TextDocumentSyncKind.Full
+            'change': TextDocumentSyncKind.incremental.value,
+            'save': true,
           },
           'completion': {
-            'completionItem': {'snippetSupport': false},
+            'completionItem': {
+              'snippetSupport': true,
+              'documentationFormat': ['plaintext', 'markdown'],
+            },
           },
           'hover': {
             'contentFormat': ['plaintext', 'markdown'],
           },
-          'definition': {'linkSupport': false},
+          'definition': {'linkSupport': true},
+          'references': {},
+          'documentSymbol': {'hierarchicalDocumentSymbolSupport': true},
+          'rename': {'prepareSupport': true},
+          'formatting': {},
           'publishDiagnostics': {},
+        },
+        'workspace': {
+          'symbol': {'dynamicRegistration': false},
+          'applyEdit': true,
         },
       },
     });
+
+  // Negotiate sync kind from server capabilities.
+    final result = response?['result'] as Map<String, dynamic>?;
+    final serverCaps = result?['capabilities'] as Map<String, dynamic>?;
+    final textDocSync = serverCaps?['textDocumentSync'];
+    if (textDocSync is int) {
+      syncKind = TextDocumentSyncKind.values.firstWhere(
+        (k) => k.value == textDocSync,
+        orElse: () => TextDocumentSyncKind.full,
+      );
+    } else if (textDocSync is Map) {
+      final change = textDocSync['change'] as int?;
+      syncKind = TextDocumentSyncKind.values.firstWhere(
+        (k) => k.value == change,
+        orElse: () => TextDocumentSyncKind.full,
+      );
+    }
+
     _notify('initialized', {});
   }
 

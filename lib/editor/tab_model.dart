@@ -3,22 +3,28 @@ import 'package:highlight/highlight_core.dart';
 import 'package:highlight/languages/all.dart';
 import 'package:path/path.dart' as p;
 
+import 'krom_code_controller.dart';
+
 class TabModel {
   TabModel({
     required this.filePath,
     required this.content,
+    this.useTreeSitter = true,
   }) : label = p.basename(filePath);
 
   final String filePath;
   final String label;
   String content;
   bool isDirty = false;
-  CodeController? _codeController;
+  final bool useTreeSitter;
+  KromCodeController? _codeController;
 
-  CodeController get codeController {
-    return _codeController ??= CodeController(
+  KromCodeController get codeController {
+    return _codeController ??= KromCodeController(
       text: content,
       language: _languageFromPath(filePath),
+      filePath: filePath,
+      useTreeSitter: useTreeSitter,
     );
   }
 

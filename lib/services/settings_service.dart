@@ -35,8 +35,24 @@ class SettingsService {
     return _defaults[languageId] ?? const [];
   }
 
+  /// All language IDs with a configured server command.
+  List<String> configuredLanguageIds() {
+    final ids = <String>{..._defaults.keys};
+    final overrides = _data['languageServers'] as Map?;
+    if (overrides != null) {
+      ids.addAll(overrides.keys.cast<String>());
+    }
+    return ids.where((id) => serverCommand(id).isNotEmpty).toList();
+  }
+
+  /// Whether to prefer tree-sitter over highlight.js for syntax highlighting.
+  bool get useTreeSitter => _data['useTreeSitter'] as bool? ?? true;
+
   static const _defaults = <String, List<String>>{
     'dart': ['dart', 'language-server', '--protocol=lsp'],
+    // Configure additional servers in settings.json, e.g.:
+    // 'python': ['pyright-langserver', '--stdio'],
+    // 'typescript': ['typescript-language-server', '--stdio'],
   };
 
   File _settingsFile() {

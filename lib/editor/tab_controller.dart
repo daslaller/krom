@@ -12,14 +12,18 @@ class KromTabController extends ChangeNotifier {
           ? _tabs[_activeIndex]
           : null;
 
-  void openFile(String path, String content) {
+  void openFile(String path, String content, {bool useTreeSitter = true}) {
     final existing = _tabs.indexWhere((t) => t.filePath == path);
     if (existing != -1) {
       _activeIndex = existing;
       notifyListeners();
       return;
     }
-    _tabs.add(TabModel(filePath: path, content: content));
+    _tabs.add(TabModel(
+      filePath: path,
+      content: content,
+      useTreeSitter: useTreeSitter,
+    ));
     _activeIndex = _tabs.length - 1;
     notifyListeners();
   }

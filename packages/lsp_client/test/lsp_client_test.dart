@@ -124,6 +124,24 @@ void main() {
     });
   });
 
+  group('TextDocumentContentChangeEvent', () {
+    test('computeTextChange finds prefix/suffix diff', () {
+      const oldText = 'hello world';
+      const newText = 'hello dart world';
+      final change = computeTextChange(oldText, newText);
+      expect(change.text, 'dart ');
+      expect(change.range, isNotNull);
+      expect(change.range!.start.line, 0);
+      expect(change.range!.start.character, 6);
+    });
+
+    test('computeTextChange returns empty for identical text', () {
+      const text = 'unchanged';
+      final change = computeTextChange(text, text);
+      expect(change.text, '');
+    });
+  });
+
   group('LspClient integration', () {
     test('start fails gracefully when server is unavailable', () async {
       expect(

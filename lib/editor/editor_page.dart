@@ -10,6 +10,8 @@ import '../panels/panel_host.dart';
 import '../services/file_service.dart';
 import '../services/lsp_service.dart';
 import '../services/settings_service.dart';
+import '../syntax/tree_sitter_languages.dart';
+import '../syntax/tree_sitter_registry.dart';
 import '../theme/krom_colors.dart';
 import '../theme/typography.dart';
 import 'code_view.dart';
@@ -35,17 +37,21 @@ class _EditorPageState extends State<EditorPage> {
   late final _lspService = LspService(_settings);
   final _focusNode = FocusNode();
 
-  // Per-file LSP helpers; disposed when their tab closes.
   final Map<String, KromAnalyzer> _analyzers = {};
   final Map<String, KromAutocompleter> _autocompleters = {};
 
   String? _rootPath;
   bool _showPalette = false;
+  bool _useTreeSitter = true;
 
   @override
   void initState() {
     super.initState();
-    _settings.load().then((_) => _openFolder(Directory.current.path));
+    registerBundledTreeSitterGrammars();
+    _settings.load().then((_) {
+      _useTreeSitter = _settings.useTreeSitter;
+      _openFolder(Directory.current.path);
+    });
   }
 
   @override
@@ -61,6 +67,7 @@ class _EditorPageState extends State<EditorPage> {
       ac.dispose();
     }
     _lspService.dispose();
+    TreeSitterRegistry.instance.dispose();
     super.dispose();
   }
 
@@ -69,26 +76,35 @@ class _EditorPageState extends State<EditorPage> {
     final files = await _treeService.allFilePaths(path);
     _paletteController.setFiles(files, path);
     setState(() {});
-    // Start the language server for the workspace root.
-    _lspService.initialize(path);
+    await _lspService.initialize(path);
   }
 
-  Future<void> _openFile(String path) async {
-    // If already open just switch to it.
+  Future<void> _openFile(String path, {int? revealLine, int? revealCharacter}) async {
     final existing = _tabController.tabs.indexWhere((t) => t.filePath == path);
     if (existing != -1) {
       _tabController.setActive(existing);
+      if (revealLine != null) {
+        _tabController.activeTab?.codeController.revealPosition(
+          revealLine,
+          character: revealCharacter ?? 0,
+        );
+      }
       return;
     }
 
     try {
       final content = await _fileService.readFile(path);
-      _tabController.openFile(path, content);
+      _tabController.openFile(path, content, useTreeSitter: _useTreeSitter);
       _wireLsp(path, content);
+      if (revealLine != null) {
+        _tabController.activeTab?.codeController.revealPosition(
+          revealLine,
+          character: revealCharacter ?? 0,
+        );
+      }
     } catch (_) {}
   }
 
-  /// Attaches KromAnalyzer + KromAutocompleter to the tab for [path].
   void _wireLsp(String path, String content) {
     final languageId = LspService.languageIdFromPath(path);
     if (languageId == null) return;
@@ -169,30 +185,60 @@ class _EditorPageState extends State<EditorPage> {
     if (offset < 0) return;
 
     final text = tab.codeController.fullText;
-    final (line, character) = _offsetToLineChar(text, offset);
+    final (line, character) = offsetToLineChar(text, offset);
 
     final locations =
         await _lspService.getDefinition(tab.filePath, line, character);
     if (locations.isEmpty) return;
 
     final loc = locations.first;
-    // Convert the file URI returned by the LSP server back to a local path.
     final targetPath = Uri.parse(loc.uri).toFilePath();
-    await _openFile(targetPath);
-    // TODO(phase2): scroll to loc.range.start.line after open
+    await _openFile(
+      targetPath,
+      revealLine: loc.range.start.line,
+      revealCharacter: loc.range.start.character,
+    );
   }
 
-  static (int line, int character) _offsetToLineChar(String text, int offset) {
-    var line = 0;
-    var lineStart = 0;
-    final end = offset.clamp(0, text.length);
-    for (var i = 0; i < end; i++) {
-      if (text[i] == '\n') {
-        line++;
-        lineStart = i + 1;
-      }
+  Future<void> _findReferences() async {
+    final tab = _tabController.activeTab;
+    if (tab == null) return;
+
+    final offset = tab.codeController.selection.baseOffset;
+    if (offset < 0) return;
+
+    final text = tab.codeController.fullText;
+    final (line, character) = offsetToLineChar(text, offset);
+
+    final locations =
+        await _lspService.getReferences(tab.filePath, line, character);
+    if (locations.isEmpty) return;
+
+    final loc = locations.first;
+    final targetPath = Uri.parse(loc.uri).toFilePath();
+    await _openFile(
+      targetPath,
+      revealLine: loc.range.start.line,
+      revealCharacter: loc.range.start.character,
+    );
+  }
+
+  Future<void> _formatDocument() async {
+    final tab = _tabController.activeTab;
+    if (tab == null) return;
+
+    final text = tab.codeController.fullText;
+    final formatted =
+        await _lspService.formatDocumentText(tab.filePath, text);
+    if (formatted == null || formatted == text) return;
+
+    tab.codeController.text = formatted;
+    _tabController.markDirty(_tabController.activeIndex);
+
+    final languageId = LspService.languageIdFromPath(tab.filePath);
+    if (languageId != null) {
+      _lspService.scheduleChange(tab.filePath, languageId, formatted);
     }
-    return (line, end - lineStart);
   }
 
   @override
@@ -213,6 +259,10 @@ class _EditorPageState extends State<EditorPage> {
             const _EscapeIntent(),
         const SingleActivator(LogicalKeyboardKey.f12):
             const _GoToDefinitionIntent(),
+        const SingleActivator(LogicalKeyboardKey.f12, shift: true):
+            const _FindReferencesIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyF, alt: true, shift: true):
+            const _FormatIntent(),
       },
       child: Actions(
         actions: {
@@ -243,6 +293,12 @@ class _EditorPageState extends State<EditorPage> {
           ),
           _GoToDefinitionIntent: CallbackAction<_GoToDefinitionIntent>(
             onInvoke: (_) => _goToDefinition(),
+          ),
+          _FindReferencesIntent: CallbackAction<_FindReferencesIntent>(
+            onInvoke: (_) => _findReferences(),
+          ),
+          _FormatIntent: CallbackAction<_FormatIntent>(
+            onInvoke: (_) => _formatDocument(),
           ),
         },
         child: Focus(
@@ -292,6 +348,7 @@ class _EditorPageState extends State<EditorPage> {
         return CodeView(
           key: ValueKey(tab.filePath),
           tab: tab,
+          lspService: _lspService,
           onChanged: _onEditorChanged,
         );
       },
@@ -414,4 +471,12 @@ class _EscapeIntent extends Intent {
 
 class _GoToDefinitionIntent extends Intent {
   const _GoToDefinitionIntent();
+}
+
+class _FindReferencesIntent extends Intent {
+  const _FindReferencesIntent();
+}
+
+class _FormatIntent extends Intent {
+  const _FormatIntent();
 }

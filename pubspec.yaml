@@ -33,6 +33,8 @@ dependencies:
   flutter_code_editor: ^0.3.5
   flutter_highlight: ^0.7.0
   highlight: ^0.7.0
+  flutter_tree_sitter: ^0.0.8
+  flutter_tree_sitter_python: ^0.0.1
   path: ^1.9.0
   lsp_client:
     path: packages/lsp_client

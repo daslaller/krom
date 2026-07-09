@@ -9,14 +9,14 @@ class TabModel {
   TabModel({
     required this.filePath,
     required this.content,
-    this.useTreeSitter = true,
+    this.useParser = true,
   }) : label = p.basename(filePath);
 
   final String filePath;
   final String label;
   String content;
   bool isDirty = false;
-  final bool useTreeSitter;
+  final bool useParser;
   KromCodeController? _codeController;
 
   KromCodeController get codeController {
@@ -24,7 +24,7 @@ class TabModel {
       text: content,
       language: _languageFromPath(filePath),
       filePath: filePath,
-      useTreeSitter: useTreeSitter,
+      useParser: useParser,
     );
   }
 

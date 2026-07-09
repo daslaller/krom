@@ -9,11 +9,11 @@ import '../panels/panel_controller.dart';
 import '../panels/panel_host.dart';
 import '../services/file_service.dart';
 import '../services/lsp_service.dart';
+import '../services/parser_service.dart';
 import '../services/settings_service.dart';
-import '../syntax/tree_sitter_languages.dart';
-import '../syntax/tree_sitter_registry.dart';
 import '../theme/krom_colors.dart';
 import '../theme/typography.dart';
+import '../utils/text_position.dart';
 import 'code_view.dart';
 import 'krom_analyzer.dart';
 import 'krom_autocompleter.dart';
@@ -35,6 +35,7 @@ class _EditorPageState extends State<EditorPage> {
   final _treeService = FileTreeService();
   final _settings = SettingsService();
   late final _lspService = LspService(_settings);
+  late final _parserService = ParserService(_settings);
   final _focusNode = FocusNode();
 
   final Map<String, KromAnalyzer> _analyzers = {};
@@ -42,14 +43,14 @@ class _EditorPageState extends State<EditorPage> {
 
   String? _rootPath;
   bool _showPalette = false;
-  bool _useTreeSitter = true;
+  bool _useParser = true;
 
   @override
   void initState() {
     super.initState();
-    registerBundledTreeSitterGrammars();
-    _settings.load().then((_) {
-      _useTreeSitter = _settings.useTreeSitter;
+    _settings.load().then((_) async {
+      _useParser = _settings.useTreeSitter;
+      await _parserService.initialize();
       _openFolder(Directory.current.path);
     });
   }
@@ -67,7 +68,7 @@ class _EditorPageState extends State<EditorPage> {
       ac.dispose();
     }
     _lspService.dispose();
-    TreeSitterRegistry.instance.dispose();
+    _parserService.dispose();
     super.dispose();
   }
 
@@ -94,8 +95,9 @@ class _EditorPageState extends State<EditorPage> {
 
     try {
       final content = await _fileService.readFile(path);
-      _tabController.openFile(path, content, useTreeSitter: _useTreeSitter);
+      _tabController.openFile(path, content, useParser: _useParser);
       _wireLsp(path, content);
+      _wireParser(path, content);
       if (revealLine != null) {
         _tabController.activeTab?.codeController.revealPosition(
           revealLine,
@@ -128,6 +130,23 @@ class _EditorPageState extends State<EditorPage> {
     _lspService.openDocument(path, languageId, content);
   }
 
+  void _wireParser(String path, String content) {
+    final languageId = ParserService.languageIdFromPath(path);
+    final tab = _tabController.tabs.firstWhere((t) => t.filePath == path);
+    final available =
+        languageId != null && _parserService.hasLanguage(languageId);
+    tab.codeController.setParserAvailable(available);
+    if (!available) return;
+
+    _parserService.onHighlights(path, tab.codeController.setHighlightSpans);
+    _parserService.openDocument(path, languageId, content);
+  }
+
+  void _closeParser(String path) {
+    _parserService.removeHighlightsListener(path);
+    _parserService.closeDocument(path);
+  }
+
   void _closeLsp(String path) {
     _analyzers.remove(path)?.dispose();
     _autocompleters.remove(path)?.dispose();
@@ -135,6 +154,7 @@ class _EditorPageState extends State<EditorPage> {
     if (languageId != null) {
       _lspService.closeDocument(path, languageId);
     }
+    _closeParser(path);
   }
 
   Future<void> _saveActiveFile() async {
@@ -165,6 +185,11 @@ class _EditorPageState extends State<EditorPage> {
         languageId,
         tab.codeController.fullText,
       );
+    }
+
+    final parserLanguageId = ParserService.languageIdFromPath(tab.filePath);
+    if (parserLanguageId != null && _parserService.hasLanguage(parserLanguageId)) {
+      _parserService.scheduleUpdate(tab.filePath, tab.codeController.fullText);
     }
     _autocompleters[tab.filePath]?.onChanged(tab.codeController);
   }

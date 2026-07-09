@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
 
 import '../services/lsp_service.dart';
-import '../syntax/tree_sitter_registry.dart';
+import '../utils/text_position.dart';
 
 /// Feeds LSP completions into a [CodeController]'s built-in [Autocompleter].
 ///

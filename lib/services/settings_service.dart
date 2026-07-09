@@ -13,6 +13,9 @@ import 'package:path/path.dart' as p;
 ///   githubToken        — GitHub personal access token (Phase 4)
 ///   anthropicApiKey    — Anthropic API key (Phase 4)
 ///   languageServers    — Map of languageId → command list (overrides defaults)
+///   parserCommand      — Command to spawn krom-parser, e.g.
+///                        ["/path/to/krom-parser", "--plugin-dir", "/path/to/plugins"]
+///   useTreeSitter      — Use krom-parser for syntax highlighting (default true)
 class SettingsService {
   Map<String, dynamic> _data = {};
 
@@ -45,7 +48,14 @@ class SettingsService {
     return ids.where((id) => serverCommand(id).isNotEmpty).toList();
   }
 
-  /// Whether to prefer tree-sitter over highlight.js for syntax highlighting.
+  /// Command to spawn the krom-parser daemon.
+  List<String> get parserCommand {
+    final cmd = _data['parserCommand'];
+    if (cmd is List) return cmd.cast<String>();
+    return const [];
+  }
+
+  /// Whether to prefer krom-parser over highlight.js for syntax highlighting.
   bool get useTreeSitter => _data['useTreeSitter'] as bool? ?? true;
 
   static const _defaults = <String, List<String>>{

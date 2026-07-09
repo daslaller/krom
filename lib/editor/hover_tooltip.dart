@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../services/lsp_service.dart';
-import '../syntax/tree_sitter_registry.dart';
 import '../theme/krom_colors.dart';
+import '../utils/text_position.dart';
 import '../theme/typography.dart';
 import 'krom_code_controller.dart';
 

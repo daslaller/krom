@@ -2,300 +2,191 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
 import 'package:path/path.dart' as p;
 
-import '../../command_palette/command_palette_controller.dart';
-import '../../editor/krom_analyzer.dart';
-import '../../editor/krom_autocompleter.dart';
-import '../../editor/tab_controller.dart';
-import '../../panels/file_tree/file_tree_service.dart';
-import '../../services/file_service.dart';
-import '../../services/lsp_service.dart';
-import '../../services/parser_service.dart';
+import '../../command_palette/palette_item.dart';
 import '../../services/settings_service.dart';
+import '../../editor/editor_session.dart';
 import '../../utils/text_position.dart';
+import 'go_to_line_dialog.dart';
 import 'ide_concepts_theme.dart';
-import 'widgets/command_palette.dart';
+import 'ide_fonts.dart';
 import 'widgets/code_view.dart';
+import 'widgets/command_palette.dart';
 import 'widgets/sidebar.dart';
 import 'widgets/status_bar.dart';
 import 'widgets/tab_bar.dart';
 import 'widgets/title_bar.dart';
 
-/// The "IDE Concepts" frontend — a full recreation of the Claude Design
-/// mockup (Midnight Indigo dark / Paper Light light), wired to Krom's real
-/// file tree, tab, LSP and tree-sitter services rather than mock data.
-///
-/// This is one of several frontends being evaluated for Krom; it lives on
-/// its own branch so it can be compared against others before one is
-/// picked as the default (see lib/main.dart on this branch).
 class IdeConceptsPage extends StatefulWidget {
-  const IdeConceptsPage({super.key});
+  const IdeConceptsPage({
+    super.key,
+    required this.settings,
+    required this.isDark,
+    required this.onToggleTheme,
+  });
+
+  final SettingsService settings;
+  final bool isDark;
+  final Future<void> Function() onToggleTheme;
 
   @override
   State<IdeConceptsPage> createState() => _IdeConceptsPageState();
 }
 
 class _IdeConceptsPageState extends State<IdeConceptsPage> {
-  final _tabController = KromTabController();
-  final _paletteController = CommandPaletteController();
-  final _fileService = FileService();
-  final _treeService = FileTreeService();
-  final _settings = SettingsService();
-  late final _lspService = LspService(_settings);
-  late final _parserService = ParserService(_settings);
+  late final EditorSession _session;
   final _focusNode = FocusNode();
 
-  final Map<String, KromAnalyzer> _analyzers = {};
-  final Map<String, KromAutocompleter> _autocompleters = {};
-
-  String? _rootPath;
   bool _showPalette = false;
   bool _showSidebar = true;
   bool _focusOn = false;
-  bool _useParser = true;
-  bool _isDark = true;
 
-  IdeConceptsTheme get _theme =>
-      _isDark ? IdeConceptsTheme.midnightIndigo : IdeConceptsTheme.paperLight;
+  IdeConceptsTheme get _theme => widget.isDark
+      ? IdeConceptsTheme.midnightIndigo
+      : IdeConceptsTheme.paperLight;
 
   @override
   void initState() {
     super.initState();
-    _settings.load().then((_) async {
-      _useParser = _settings.useTreeSitter;
-      await _parserService.initialize();
-      _openFolder(Directory.current.path);
-    });
+    _session = EditorSession(settings: widget.settings);
+    _session.addListener(_onSessionChanged);
+    _registerPaletteCommands();
+    _session.initialize();
+  }
+
+  void _onSessionChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _registerPaletteCommands() {
+    _session.paletteController.setCommands([
+      const PaletteCommandItem(
+        id: 'toggle-focus',
+        label: 'Toggle Focus Mode',
+        hint: 'view',
+      ),
+      const PaletteCommandItem(
+        id: 'toggle-sidebar',
+        label: 'Toggle Sidebar',
+        hint: 'Ctrl+B',
+      ),
+      const PaletteCommandItem(
+        id: 'toggle-theme',
+        label: 'Switch Theme',
+        hint: 'theme',
+      ),
+      const PaletteCommandItem(
+        id: 'save-file',
+        label: 'Save File',
+        hint: 'Ctrl+S',
+      ),
+      const PaletteCommandItem(
+        id: 'save-all',
+        label: 'Save All',
+        hint: 'Ctrl+Shift+S',
+      ),
+      const PaletteCommandItem(
+        id: 'go-to-line',
+        label: 'Go to Line…',
+        hint: 'Ctrl+G',
+      ),
+      const PaletteCommandItem(
+        id: 'format-document',
+        label: 'Format Document',
+        hint: 'Alt+Shift+F',
+      ),
+      const PaletteCommandItem(
+        id: 'go-to-definition',
+        label: 'Go to Definition',
+        hint: 'F12',
+      ),
+      const PaletteCommandItem(
+        id: 'find-references',
+        label: 'Find References',
+        hint: 'Shift+F12',
+      ),
+      const PaletteCommandItem(
+        id: 'toggle-autosave',
+        label: 'Toggle Autosave',
+        hint: 'settings',
+      ),
+    ]);
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
-    _paletteController.dispose();
+    _session.removeListener(_onSessionChanged);
+    _session.dispose();
     _focusNode.dispose();
-    for (final a in _analyzers.values) {
-      a.dispose();
-    }
-    for (final ac in _autocompleters.values) {
-      ac.dispose();
-    }
-    _lspService.dispose();
-    _parserService.dispose();
     super.dispose();
   }
 
-  Future<void> _openFolder(String path) async {
-    _rootPath = path;
-    final files = await _treeService.allFilePaths(path);
-    _paletteController.setFiles(files, path);
-    if (mounted) setState(() {});
-    await _lspService.initialize(path);
-  }
+  String get _workspaceName =>
+      _session.rootPath?.split(Platform.pathSeparator).last ?? 'Krom';
 
-  Future<void> _openFile(
-    String path, {
-    int? revealLine,
-    int? revealCharacter,
-  }) async {
-    final existing = _tabController.tabs.indexWhere((t) => t.filePath == path);
-    if (existing != -1) {
-      _tabController.setActive(existing);
-      if (revealLine != null) {
-        _tabController.activeTab?.codeController.revealPosition(
-          revealLine,
-          character: revealCharacter ?? 0,
-        );
-      }
-      return;
+  String get _activePath {
+    final tab = _session.tabController.activeTab;
+    if (tab == null) return '';
+    final root = _session.rootPath;
+    if (root != null && tab.filePath.startsWith(root)) {
+      return tab.filePath.substring(root.length + 1).replaceAll('\\', '/');
     }
-
-    try {
-      final content = await _fileService.readFile(path);
-      _tabController.openFile(path, content, useParser: _useParser);
-      _wireLsp(path, content);
-      _wireParser(path, content);
-      if (revealLine != null) {
-        _tabController.activeTab?.codeController.revealPosition(
-          revealLine,
-          character: revealCharacter ?? 0,
-        );
-      }
-    } catch (_) {}
-  }
-
-  void _wireLsp(String path, String content) {
-    final languageId = LspService.languageIdFromPath(path);
-    if (languageId == null) return;
-
-    final tab = _tabController.tabs.firstWhere((t) => t.filePath == path);
-
-    final analyzer = KromAnalyzer(
-      lspService: _lspService,
-      filePath: path,
-      onNewDiagnostics: () => tab.codeController.analyzeCode(),
-    );
-    _analyzers[path] = analyzer;
-    tab.codeController.analyzer = analyzer;
-
-    final autocompleter = KromAutocompleter(
-      lspService: _lspService,
-      filePath: path,
-    );
-    _autocompleters[path] = autocompleter;
-
-    _lspService.openDocument(path, languageId, content);
-  }
-
-  void _wireParser(String path, String content) {
-    final languageId = ParserService.languageIdFromPath(path);
-    final tab = _tabController.tabs.firstWhere((t) => t.filePath == path);
-    final available =
-        languageId != null && _parserService.hasLanguage(languageId);
-    tab.codeController.setParserAvailable(available);
-    if (!available) return;
-
-    _parserService.onHighlights(path, tab.codeController.setHighlightSpans);
-    _parserService.openDocument(path, languageId, content);
-  }
-
-  void _closeParser(String path) {
-    _parserService.removeHighlightsListener(path);
-    _parserService.closeDocument(path);
-  }
-
-  void _closeLsp(String path) {
-    _analyzers.remove(path)?.dispose();
-    _autocompleters.remove(path)?.dispose();
-    final languageId = LspService.languageIdFromPath(path);
-    if (languageId != null) {
-      _lspService.closeDocument(path, languageId);
-    }
-    _closeParser(path);
-  }
-
-  Future<void> _saveActiveFile() async {
-    final tab = _tabController.activeTab;
-    if (tab == null || !tab.isDirty) return;
-    final content = tab.codeController.fullText;
-    await _fileService.writeFile(tab.filePath, content);
-    tab.content = content;
-    _tabController.markClean(_tabController.activeIndex);
+    return p.basename(tab.filePath);
   }
 
   void _togglePalette() {
     setState(() {
       _showPalette = !_showPalette;
-      if (_showPalette) _paletteController.updateQuery('');
+      if (_showPalette) _session.paletteController.updateQuery('');
     });
   }
 
-  void _toggleFocus() {
-    setState(() => _focusOn = !_focusOn);
+  void _toggleFocus() => setState(() => _focusOn = !_focusOn);
+
+  Future<void> _runPaletteCommand(String id) async {
+    switch (id) {
+      case 'toggle-focus':
+        _toggleFocus();
+      case 'toggle-sidebar':
+        setState(() => _showSidebar = !_showSidebar);
+      case 'toggle-theme':
+        await widget.onToggleTheme();
+      case 'save-file':
+        await _session.saveActiveFile();
+      case 'save-all':
+        await _session.saveAllDirty();
+      case 'go-to-line':
+        await _promptGoToLine();
+      case 'format-document':
+        await _session.formatDocument();
+      case 'go-to-definition':
+        await _session.goToDefinition();
+      case 'find-references':
+        await _session.findReferences();
+      case 'toggle-autosave':
+        await widget.settings.setAutosave(!widget.settings.autosave);
+        setState(() {});
+    }
   }
 
-  String get _activePath {
-    final tab = _tabController.activeTab;
-    if (tab != null) {
-      final root = _rootPath;
-      if (root != null && tab.filePath.startsWith(root)) {
-        return tab.filePath.substring(root.length + 1).replaceAll('\\', '/');
-      }
-      return p.basename(tab.filePath);
-    }
-    if (_rootPath != null) {
-      return _rootPath!.split(Platform.pathSeparator).last;
-    }
-    return 'Krom';
-  }
-
-  void _onEditorChanged() {
-    final tab = _tabController.activeTab;
+  Future<void> _promptGoToLine() async {
+    final tab = _session.tabController.activeTab;
     if (tab == null) return;
-    _tabController.markDirty(_tabController.activeIndex);
-
-    final languageId = LspService.languageIdFromPath(tab.filePath);
-    if (languageId != null) {
-      _lspService.scheduleChange(
-        tab.filePath,
-        languageId,
-        tab.codeController.fullText,
-      );
-    }
-
-    final parserLanguageId = ParserService.languageIdFromPath(tab.filePath);
-    if (parserLanguageId != null &&
-        _parserService.hasLanguage(parserLanguageId)) {
-      _parserService.scheduleUpdate(tab.filePath, tab.codeController.fullText);
-    }
-    _autocompleters[tab.filePath]?.onChanged(tab.codeController);
+    final offset = tab.codeController.selection.baseOffset;
+    final text = tab.codeController.fullText;
+    final safeOffset = offset.clamp(0, text.length);
+    final (line, _) = offsetToLineChar(text, safeOffset);
+    final target = await showGoToLineDialog(
+      context,
+      _theme,
+      currentLine: line + 1,
+    );
+    if (target != null) _session.goToLine(target);
   }
 
   void _closeActiveTab() {
-    final idx = _tabController.activeIndex;
-    if (idx < 0) return;
-    final path = _tabController.tabs[idx].filePath;
-    _tabController.closeTab(idx);
-    _closeLsp(path);
-  }
-
-  Future<void> _goToDefinition() async {
-    final tab = _tabController.activeTab;
-    if (tab == null) return;
-    final offset = tab.codeController.selection.baseOffset;
-    if (offset < 0) return;
-    final text = tab.codeController.fullText;
-    final (line, character) = offsetToLineChar(text, offset);
-    final locations = await _lspService.getDefinition(
-      tab.filePath,
-      line,
-      character,
-    );
-    if (locations.isEmpty) return;
-    final loc = locations.first;
-    final targetPath = Uri.parse(loc.uri).toFilePath();
-    await _openFile(
-      targetPath,
-      revealLine: loc.range.start.line,
-      revealCharacter: loc.range.start.character,
-    );
-  }
-
-  Future<void> _findReferences() async {
-    final tab = _tabController.activeTab;
-    if (tab == null) return;
-    final offset = tab.codeController.selection.baseOffset;
-    if (offset < 0) return;
-    final text = tab.codeController.fullText;
-    final (line, character) = offsetToLineChar(text, offset);
-    final locations = await _lspService.getReferences(
-      tab.filePath,
-      line,
-      character,
-    );
-    if (locations.isEmpty) return;
-    final loc = locations.first;
-    final targetPath = Uri.parse(loc.uri).toFilePath();
-    await _openFile(
-      targetPath,
-      revealLine: loc.range.start.line,
-      revealCharacter: loc.range.start.character,
-    );
-  }
-
-  Future<void> _formatDocument() async {
-    final tab = _tabController.activeTab;
-    if (tab == null) return;
-    final text = tab.codeController.fullText;
-    final formatted = await _lspService.formatDocumentText(tab.filePath, text);
-    if (formatted == null || formatted == text) return;
-    tab.codeController.text = formatted;
-    _tabController.markDirty(_tabController.activeIndex);
-    final languageId = LspService.languageIdFromPath(tab.filePath);
-    if (languageId != null) {
-      _lspService.scheduleChange(tab.filePath, languageId, formatted);
-    }
+    _session.closeActiveTab();
   }
 
   @override
@@ -308,13 +199,25 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
         const SingleActivator(LogicalKeyboardKey.keyK, control: true):
             const _PaletteIntent(),
         const SingleActivator(LogicalKeyboardKey.keyB, control: true):
-            const _FileTreeIntent(),
+            const _SidebarIntent(),
         const SingleActivator(LogicalKeyboardKey.keyS, control: true):
             const _SaveIntent(),
+        const SingleActivator(
+          LogicalKeyboardKey.keyS,
+          control: true,
+          shift: true,
+        ): const _SaveAllIntent(),
         const SingleActivator(LogicalKeyboardKey.keyW, control: true):
             const _CloseTabIntent(),
         const SingleActivator(LogicalKeyboardKey.tab, control: true):
             const _NextTabIntent(),
+        const SingleActivator(
+          LogicalKeyboardKey.tab,
+          control: true,
+          shift: true,
+        ): const _PrevTabIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyG, control: true):
+            const _GoToLineIntent(),
         const SingleActivator(LogicalKeyboardKey.escape): const _EscapeIntent(),
         const SingleActivator(LogicalKeyboardKey.f12):
             const _GoToDefinitionIntent(),
@@ -328,17 +231,26 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
           _PaletteIntent: CallbackAction<_PaletteIntent>(
             onInvoke: (_) => _togglePalette(),
           ),
-          _FileTreeIntent: CallbackAction<_FileTreeIntent>(
+          _SidebarIntent: CallbackAction<_SidebarIntent>(
             onInvoke: (_) => setState(() => _showSidebar = !_showSidebar),
           ),
           _SaveIntent: CallbackAction<_SaveIntent>(
-            onInvoke: (_) => _saveActiveFile(),
+            onInvoke: (_) => _session.saveActiveFile(),
+          ),
+          _SaveAllIntent: CallbackAction<_SaveAllIntent>(
+            onInvoke: (_) => _session.saveAllDirty(),
           ),
           _CloseTabIntent: CallbackAction<_CloseTabIntent>(
             onInvoke: (_) => _closeActiveTab(),
           ),
           _NextTabIntent: CallbackAction<_NextTabIntent>(
-            onInvoke: (_) => _tabController.nextTab(),
+            onInvoke: (_) => _session.tabController.nextTab(),
+          ),
+          _PrevTabIntent: CallbackAction<_PrevTabIntent>(
+            onInvoke: (_) => _session.tabController.previousTab(),
+          ),
+          _GoToLineIntent: CallbackAction<_GoToLineIntent>(
+            onInvoke: (_) => _promptGoToLine(),
           ),
           _EscapeIntent: CallbackAction<_EscapeIntent>(
             onInvoke: (_) {
@@ -351,13 +263,13 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
             },
           ),
           _GoToDefinitionIntent: CallbackAction<_GoToDefinitionIntent>(
-            onInvoke: (_) => _goToDefinition(),
+            onInvoke: (_) => _session.goToDefinition(),
           ),
           _FindReferencesIntent: CallbackAction<_FindReferencesIntent>(
-            onInvoke: (_) => _findReferences(),
+            onInvoke: (_) => _session.findReferences(),
           ),
           _FormatIntent: CallbackAction<_FormatIntent>(
-            onInvoke: (_) => _formatDocument(),
+            onInvoke: (_) => _session.formatDocument(),
           ),
         },
         child: Focus(
@@ -369,35 +281,67 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
               children: [
                 Column(
                   children: [
-                    if (!_focusOn)
-                      IdeConceptsTitleBar(
-                        theme: theme,
-                        activePath: _activePath,
-                        isDark: _isDark,
-                        focusOn: _focusOn,
-                        onToggleFocus: _toggleFocus,
-                        onOpenPalette: _togglePalette,
-                        onToggleTheme: () => setState(() => _isDark = !_isDark),
+                    AnimatedSlide(
+                      duration: const Duration(milliseconds: 280),
+                      curve: Curves.easeOutCubic,
+                      offset: _focusOn ? const Offset(0, -0.15) : Offset.zero,
+                      child: AnimatedOpacity(
+                        duration: const Duration(milliseconds: 280),
+                        opacity: _focusOn ? 0 : 1,
+                        child: IgnorePointer(
+                          ignoring: _focusOn,
+                          child: IdeConceptsTitleBar(
+                            theme: theme,
+                            workspaceName: _workspaceName,
+                            activePath: _activePath,
+                            isDark: widget.isDark,
+                            focusOn: _focusOn,
+                            onToggleFocus: _toggleFocus,
+                            onOpenPalette: _togglePalette,
+                            onToggleTheme: () => widget.onToggleTheme(),
+                          ),
+                        ),
                       ),
+                    ),
                     Expanded(
                       child: Row(
                         children: [
-                          if (_showSidebar && !_focusOn)
-                            IdeConceptsSidebar(
-                              theme: theme,
-                              rootPath: _rootPath,
-                              activeFilePath:
-                                  _tabController.activeTab?.filePath,
-                              onFileSelected: _openFile,
-                            ),
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 320),
+                            curve: Curves.easeOutCubic,
+                            width: _showSidebar && !_focusOn ? 236 : 0,
+                            child: _showSidebar && !_focusOn
+                                ? IdeConceptsSidebar(
+                                    theme: theme,
+                                    rootPath: _session.rootPath,
+                                    activeFilePath: _session
+                                        .tabController.activeTab?.filePath,
+                                    gitStatus: _session.gitStatus,
+                                    onFileSelected: _session.openFile,
+                                  )
+                                : const SizedBox.shrink(),
+                          ),
                           Expanded(
                             child: Column(
                               children: [
-                                if (!_focusOn)
-                                  IdeConceptsTabBar(
-                                    theme: theme,
-                                    controller: _tabController,
+                                AnimatedSlide(
+                                  duration: const Duration(milliseconds: 280),
+                                  curve: Curves.easeOutCubic,
+                                  offset: _focusOn
+                                      ? const Offset(0, -0.15)
+                                      : Offset.zero,
+                                  child: AnimatedOpacity(
+                                    duration: const Duration(milliseconds: 280),
+                                    opacity: _focusOn ? 0 : 1,
+                                    child: IgnorePointer(
+                                      ignoring: _focusOn,
+                                      child: IdeConceptsTabBar(
+                                        theme: theme,
+                                        controller: _session.tabController,
+                                      ),
+                                    ),
                                   ),
+                                ),
                                 Expanded(child: _buildEditorArea(theme)),
                               ],
                             ),
@@ -406,11 +350,12 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
                       ),
                     ),
                     ListenableBuilder(
-                      listenable: _tabController,
+                      listenable: _session.tabController,
                       builder: (context, _) => IdeConceptsStatusBar(
                         theme: theme,
-                        activeTab: _tabController.activeTab,
+                        activeTab: _session.tabController.activeTab,
                         focusOn: _focusOn,
+                        autosaveOn: widget.settings.autosave,
                         onExitFocus: _toggleFocus,
                       ),
                     ),
@@ -419,9 +364,9 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
                 if (_showPalette)
                   IdeConceptsCommandPalette(
                     theme: theme,
-                    controller: _paletteController,
-                    rootPath: _rootPath,
-                    onFileSelected: _openFile,
+                    controller: _session.paletteController,
+                    onCommand: _runPaletteCommand,
+                    onFileSelected: _session.openFile,
                     onDismiss: () => setState(() => _showPalette = false),
                   ),
               ],
@@ -434,16 +379,17 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
 
   Widget _buildEditorArea(IdeConceptsTheme theme) {
     return ListenableBuilder(
-      listenable: _tabController,
+      listenable: _session.tabController,
       builder: (context, _) {
-        final tab = _tabController.activeTab;
+        final tab = _session.tabController.activeTab;
         if (tab == null) return _buildEmptyState(theme);
         return IdeConceptsCodeView(
           key: ValueKey(tab.filePath),
           theme: theme,
           tab: tab,
-          lspService: _lspService,
-          onChanged: _onEditorChanged,
+          focusOn: _focusOn,
+          lspService: _session.lspService,
+          onChanged: _session.onEditorChanged,
         );
       },
     );
@@ -453,33 +399,43 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
     return Container(
       color: theme.editorBg,
       child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Krom',
-              style: TextStyle(
-                color: theme.iconDim,
-                fontSize: 40,
-                fontWeight: FontWeight.w300,
-                height: 1,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Krom',
+                style: IdeFonts.mono(
+                  color: theme.iconDim,
+                  fontSize: 40,
+                  weight: FontWeight.w300,
+                  height: 1,
+                ),
               ),
-            ),
-            const SizedBox(height: 32),
-            _EmptyStateAction(
-              theme: theme,
-              label: 'Open File',
-              shortcut: 'Ctrl+P',
-              onTap: _togglePalette,
-            ),
-            const SizedBox(height: 8),
-            _EmptyStateAction(
-              theme: theme,
-              label: 'Toggle File Tree',
-              shortcut: 'Ctrl+B',
-              onTap: () => setState(() => _showSidebar = !_showSidebar),
-            ),
-          ],
+              const SizedBox(height: 32),
+              _EmptyStateAction(
+                theme: theme,
+                label: 'Open File',
+                shortcut: 'Ctrl+P',
+                onTap: _togglePalette,
+              ),
+              const SizedBox(height: 8),
+              _EmptyStateAction(
+                theme: theme,
+                label: 'Toggle Sidebar',
+                shortcut: 'Ctrl+B',
+                onTap: () => setState(() => _showSidebar = !_showSidebar),
+              ),
+              const SizedBox(height: 8),
+              _EmptyStateAction(
+                theme: theme,
+                label: 'Focus Mode',
+                shortcut: 'palette',
+                onTap: _toggleFocus,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -527,11 +483,11 @@ class _EmptyStateActionState extends State<_EmptyStateAction> {
             children: [
               Text(
                 widget.label,
-                style: TextStyle(color: theme.muted, fontSize: 14),
+                style: IdeFonts.mono(color: theme.muted, fontSize: 14),
               ),
               Text(
                 widget.shortcut,
-                style: TextStyle(color: theme.iconDim, fontSize: 12),
+                style: IdeFonts.mono(color: theme.iconDim, fontSize: 12),
               ),
             ],
           ),
@@ -545,12 +501,16 @@ class _PaletteIntent extends Intent {
   const _PaletteIntent();
 }
 
-class _FileTreeIntent extends Intent {
-  const _FileTreeIntent();
+class _SidebarIntent extends Intent {
+  const _SidebarIntent();
 }
 
 class _SaveIntent extends Intent {
   const _SaveIntent();
+}
+
+class _SaveAllIntent extends Intent {
+  const _SaveAllIntent();
 }
 
 class _CloseTabIntent extends Intent {
@@ -559,6 +519,14 @@ class _CloseTabIntent extends Intent {
 
 class _NextTabIntent extends Intent {
   const _NextTabIntent();
+}
+
+class _PrevTabIntent extends Intent {
+  const _PrevTabIntent();
+}
+
+class _GoToLineIntent extends Intent {
+  const _GoToLineIntent();
 }
 
 class _EscapeIntent extends Intent {

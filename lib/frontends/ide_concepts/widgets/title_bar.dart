@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 
 import '../ide_concepts_theme.dart';
+import '../ide_fonts.dart';
 
-/// Top chrome strip matching the Beautiful IDE v2 mockup: traffic dots,
-/// active file path, focus toggle, palette shortcut, and theme pill.
+/// Top chrome with Tacet-style path breadcrumb pill and editor controls.
 class IdeConceptsTitleBar extends StatelessWidget {
   const IdeConceptsTitleBar({
     super.key,
     required this.theme,
+    required this.workspaceName,
     required this.activePath,
     required this.isDark,
     required this.focusOn,
@@ -17,6 +19,7 @@ class IdeConceptsTitleBar extends StatelessWidget {
   });
 
   final IdeConceptsTheme theme;
+  final String workspaceName;
   final String activePath;
   final bool isDark;
   final bool focusOn;
@@ -27,8 +30,8 @@ class IdeConceptsTitleBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 40,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      height: 42,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: theme.topBg,
         border: Border(bottom: BorderSide(color: theme.hairline)),
@@ -40,10 +43,10 @@ class IdeConceptsTitleBar extends StatelessWidget {
               children: List.generate(
                 3,
                 (i) => Padding(
-                  padding: EdgeInsets.only(right: i == 2 ? 0 : 7),
+                  padding: EdgeInsets.only(right: i == 2 ? 0 : 8),
                   child: Container(
-                    width: 11,
-                    height: 11,
+                    width: 10,
+                    height: 10,
                     decoration: BoxDecoration(
                       color: theme.chromeDot,
                       shape: BoxShape.circle,
@@ -53,13 +56,11 @@ class IdeConceptsTitleBar extends StatelessWidget {
               ),
             ),
           ),
-          Text(
-            activePath,
-            style: TextStyle(
-              fontSize: 12,
-              letterSpacing: 0.02 * 12,
-              color: theme.muted,
-            ),
+          _PathBreadcrumb(
+            theme: theme,
+            workspaceName: workspaceName,
+            activePath: activePath,
+            onTap: onOpenPalette,
           ),
           Expanded(
             child: Row(
@@ -67,7 +68,7 @@ class IdeConceptsTitleBar extends StatelessWidget {
               children: [
                 _ChromeButton(
                   theme: theme,
-                  label: focusOn ? 'Exit Focus' : 'Focus',
+                  label: focusOn ? 'exit focus' : 'focus',
                   onTap: onToggleFocus,
                 ),
                 const SizedBox(width: 8),
@@ -86,6 +87,77 @@ class IdeConceptsTitleBar extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PathBreadcrumb extends StatefulWidget {
+  const _PathBreadcrumb({
+    required this.theme,
+    required this.workspaceName,
+    required this.activePath,
+    required this.onTap,
+  });
+
+  final IdeConceptsTheme theme;
+  final String workspaceName;
+  final String activePath;
+  final VoidCallback onTap;
+
+  @override
+  State<_PathBreadcrumb> createState() => _PathBreadcrumbState();
+}
+
+class _PathBreadcrumbState extends State<_PathBreadcrumb> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = widget.theme;
+    final displayPath = widget.activePath.isEmpty
+        ? widget.workspaceName
+        : widget.activePath;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+          constraints: const BoxConstraints(minWidth: 280),
+          decoration: BoxDecoration(
+            color: theme.editorBg,
+            border: Border.all(
+              color: _hovered ? theme.hairlineStrong : theme.hairline,
+            ),
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                p.basename(widget.workspaceName),
+                style: IdeFonts.mono(fontSize: 11, color: theme.iconDim),
+              ),
+              Text(
+                ' / ',
+                style: IdeFonts.mono(fontSize: 11, color: theme.iconDim),
+              ),
+              Flexible(
+                child: Text(
+                  displayPath,
+                  overflow: TextOverflow.ellipsis,
+                  style: IdeFonts.mono(fontSize: 11.5, color: theme.muted),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -120,12 +192,14 @@ class _ChromeButtonState extends State<_ChromeButton> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
           decoration: BoxDecoration(
-            border: Border.all(color: widget.theme.hairline),
+            border: Border.all(
+              color: _hovered ? widget.theme.hairlineStrong : widget.theme.hairline,
+            ),
             borderRadius: BorderRadius.circular(6),
           ),
           child: Text(
             widget.label,
-            style: TextStyle(
+            style: IdeFonts.mono(
               fontSize: 11,
               color: _hovered ? widget.theme.text : widget.theme.muted,
             ),
@@ -162,7 +236,8 @@ class _ThemePillState extends State<_ThemePill> {
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: widget.onTap,
-        child: Opacity(
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 150),
           opacity: _hovered ? 0.85 : 1,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
@@ -185,7 +260,10 @@ class _ThemePillState extends State<_ThemePill> {
                 const SizedBox(width: 6),
                 Text(
                   widget.isDark ? 'Dark' : 'Light',
-                  style: TextStyle(fontSize: 11, color: widget.theme.muted),
+                  style: IdeFonts.mono(
+                    fontSize: 11,
+                    color: widget.theme.muted,
+                  ),
                 ),
               ],
             ),

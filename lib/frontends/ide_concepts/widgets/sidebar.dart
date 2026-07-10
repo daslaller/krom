@@ -215,7 +215,7 @@ class _NodeRowState extends State<_NodeRow> {
               ),
               color: isActive
                   ? theme.rowActive
-                  : (_hovered ? theme.hairline : Colors.transparent),
+                  : (_hovered ? theme.rowHover : Colors.transparent),
               child: Row(
                 children: [
                   if (node.isDirectory)

@@ -3,7 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../command_palette/command_palette.dart';
+import 'package:path/path.dart' as p;
+
 import '../../command_palette/command_palette_controller.dart';
 import '../../editor/krom_analyzer.dart';
 import '../../editor/krom_autocompleter.dart';
@@ -15,6 +16,7 @@ import '../../services/parser_service.dart';
 import '../../services/settings_service.dart';
 import '../../utils/text_position.dart';
 import 'ide_concepts_theme.dart';
+import 'widgets/command_palette.dart';
 import 'widgets/code_view.dart';
 import 'widgets/sidebar.dart';
 import 'widgets/status_bar.dart';
@@ -51,6 +53,7 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
   String? _rootPath;
   bool _showPalette = false;
   bool _showSidebar = true;
+  bool _focusOn = false;
   bool _useParser = true;
   bool _isDark = true;
 
@@ -188,6 +191,25 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
     });
   }
 
+  void _toggleFocus() {
+    setState(() => _focusOn = !_focusOn);
+  }
+
+  String get _activePath {
+    final tab = _tabController.activeTab;
+    if (tab != null) {
+      final root = _rootPath;
+      if (root != null && tab.filePath.startsWith(root)) {
+        return tab.filePath.substring(root.length + 1).replaceAll('\\', '/');
+      }
+      return p.basename(tab.filePath);
+    }
+    if (_rootPath != null) {
+      return _rootPath!.split(Platform.pathSeparator).last;
+    }
+    return 'Krom';
+  }
+
   void _onEditorChanged() {
     final tab = _tabController.activeTab;
     if (tab == null) return;
@@ -283,6 +305,8 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
       shortcuts: {
         const SingleActivator(LogicalKeyboardKey.keyP, control: true):
             const _PaletteIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyK, control: true):
+            const _PaletteIntent(),
         const SingleActivator(LogicalKeyboardKey.keyB, control: true):
             const _FileTreeIntent(),
         const SingleActivator(LogicalKeyboardKey.keyS, control: true):
@@ -320,6 +344,8 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
             onInvoke: (_) {
               if (_showPalette) {
                 setState(() => _showPalette = false);
+              } else if (_focusOn) {
+                setState(() => _focusOn = false);
               }
               return null;
             },
@@ -343,18 +369,20 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
               children: [
                 Column(
                   children: [
-                    IdeConceptsTitleBar(
-                      theme: theme,
-                      label: _rootPath != null
-                          ? _rootPath!.split(Platform.pathSeparator).last
-                          : 'Krom',
-                      isDark: _isDark,
-                      onToggleTheme: () => setState(() => _isDark = !_isDark),
-                    ),
+                    if (!_focusOn)
+                      IdeConceptsTitleBar(
+                        theme: theme,
+                        activePath: _activePath,
+                        isDark: _isDark,
+                        focusOn: _focusOn,
+                        onToggleFocus: _toggleFocus,
+                        onOpenPalette: _togglePalette,
+                        onToggleTheme: () => setState(() => _isDark = !_isDark),
+                      ),
                     Expanded(
                       child: Row(
                         children: [
-                          if (_showSidebar)
+                          if (_showSidebar && !_focusOn)
                             IdeConceptsSidebar(
                               theme: theme,
                               rootPath: _rootPath,
@@ -365,10 +393,11 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
                           Expanded(
                             child: Column(
                               children: [
-                                IdeConceptsTabBar(
-                                  theme: theme,
-                                  controller: _tabController,
-                                ),
+                                if (!_focusOn)
+                                  IdeConceptsTabBar(
+                                    theme: theme,
+                                    controller: _tabController,
+                                  ),
                                 Expanded(child: _buildEditorArea(theme)),
                               ],
                             ),
@@ -381,12 +410,15 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
                       builder: (context, _) => IdeConceptsStatusBar(
                         theme: theme,
                         activeTab: _tabController.activeTab,
+                        focusOn: _focusOn,
+                        onExitFocus: _toggleFocus,
                       ),
                     ),
                   ],
                 ),
                 if (_showPalette)
-                  CommandPalette(
+                  IdeConceptsCommandPalette(
+                    theme: theme,
                     controller: _paletteController,
                     rootPath: _rootPath,
                     onFileSelected: _openFile,

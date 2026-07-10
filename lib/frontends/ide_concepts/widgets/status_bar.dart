@@ -10,10 +10,14 @@ class IdeConceptsStatusBar extends StatelessWidget {
     super.key,
     required this.theme,
     required this.activeTab,
+    this.focusOn = false,
+    this.onExitFocus,
   });
 
   final IdeConceptsTheme theme;
   final TabModel? activeTab;
+  final bool focusOn;
+  final VoidCallback? onExitFocus;
 
   @override
   Widget build(BuildContext context) {
@@ -49,6 +53,18 @@ class IdeConceptsStatusBar extends StatelessWidget {
             ),
           ],
           const Spacer(),
+          if (focusOn && onExitFocus != null)
+            GestureDetector(
+              onTap: onExitFocus,
+              child: Text(
+                'esc to exit focus',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: theme.statusText,
+                  decoration: TextDecoration.underline,
+                ),
+              ),
+            ),
           if (tab != null)
             ListenableBuilder(
               listenable: tab.codeController,

@@ -35,10 +35,14 @@ dependencies:
   highlight: ^0.7.0
   google_fonts: ^6.2.1
   path: ^1.9.0
-  lsp_client:
-    path: packages/lsp_client
   parser_client:
-    path: packages/parser_client
+    git:
+      url: https://github.com/daslaller/krom-parser.git
+      path: clients/dart
+      ref: cursor/move-parser-client-969a
+  lsp_client:
+    git:
+      url: https://github.com/daslaller/dart_lsp_client.git
 
 dev_dependencies:
   flutter_test:

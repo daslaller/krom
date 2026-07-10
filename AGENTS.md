@@ -3,9 +3,13 @@
 ## Cursor Cloud specific instructions
 
 Krom is a Flutter desktop code editor (tabbed editor, file tree, `Ctrl+P` command
-palette, syntax highlighting, and optional Dart LSP integration). It contains a
-supporting pure-Dart package at `packages/lsp_client`. Standard Flutter/Dart
-commands apply; only the non-obvious cloud caveats are captured here.
+palette, syntax highlighting, and optional Dart LSP integration). Client packages
+are external:
+
+- `parser_client` — [krom-parser/clients/dart](https://github.com/daslaller/krom-parser/tree/main/clients/dart)
+- `lsp_client` — [dart_lsp_client](https://github.com/daslaller/dart_lsp_client)
+
+Standard Flutter/Dart commands apply; only the non-obvious cloud caveats are captured here.
 
 ### Toolchain (already installed in the VM snapshot)
 
@@ -16,14 +20,9 @@ commands apply; only the non-obvious cloud caveats are captured here.
 
 ### Commands
 
-- Dependencies: `flutter pub get` at the repo root. The `packages/lsp_client`
-  package is a **separate pub package** and needs its own `dart pub get` run from
-  inside `packages/lsp_client` before it can be analyzed/tested standalone.
-- Lint: `flutter analyze` (root). Note it reports `undefined_function` errors for
-  `packages/lsp_client/test/*` because that package's `test` dev-dependency isn't
-  resolved in the root context — analyze that package on its own with
-  `dart analyze` inside `packages/lsp_client`.
-- Test: `flutter test` (root widget test) and `dart test` inside `packages/lsp_client`.
+- Dependencies: `flutter pub get` at the repo root (fetches git deps above).
+- Lint: `flutter analyze` (root).
+- Test: `flutter test` (root widget test). Run `dart test` inside each client repo separately.
 - Run (dev, hot reload): `flutter run -d linux` — requires `DISPLAY=:1`.
 - Build (dev): `flutter build linux --debug`.
 
@@ -34,13 +33,10 @@ commands apply; only the non-obvious cloud caveats are captured here.
   `linux/` folder lives in the VM snapshot but is **not committed**). If it is
   ever missing, regenerate it with that command, then `git checkout -- .metadata
   pubspec.lock` since `flutter create` rewrites those tracked files.
-- The GUI runs on X display `:1` with software rendering; the `libEGL ... DRI3`
+- The GUI runs on X display `:1` with software rendering; the `EGL ... DRI3`
   warning at startup is harmless.
 - The editor opens the current working directory as its workspace
   (`Directory.current.path`), and indexes the file list / command palette **once
   at startup**. Create files before launching, or hot-restart (`R` in
   `flutter run`) to re-index.
-- Pre-existing failures unrelated to the environment (do not "fix" as setup work):
-  `flutter test` fails on a `RenderFlex` overflow in the empty-state UI at the
-  800x600 test surface, and `packages/lsp_client` `dart test` has one failing
-  assertion (a `contains` matcher passed a `List<int>` instead of an element).
+- If `dart_lsp_client` is not on GitHub yet, see `docs/extracting-dart-lsp-client.md`.

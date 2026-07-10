@@ -11,10 +11,10 @@ abstract final class KromTypography {
   static const uiFontSize = 13.5;
   static const uiFontSizeSmall = 12.0;
 
-  static TextStyle code({Color? color}) => TextStyle(
+  static TextStyle code({Color? color, double? fontSize}) => TextStyle(
         fontFamily: codeFontFamily,
         fontFamilyFallback: codeFontFallback,
-        fontSize: codeFontSize,
+        fontSize: fontSize ?? codeFontSize,
         height: codeLineHeight,
         color: color,
       );

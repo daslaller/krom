@@ -1,0 +1,10 @@
+# Dart / pub
+.dart_tool/
+.packages
+build/
+pubspec.lock
+
+# IDE
+.idea/
+*.iml
+.vscode/

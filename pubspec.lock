@@ -195,9 +195,11 @@ packages:
   lsp_client:
     dependency: "direct main"
     description:
-      path: "packages/lsp_client"
-      relative: true
-    source: path
+      path: "."
+      ref: "HEAD"
+      resolved-ref: "b3b6fd0af1833dad928568280dfdd337e9da0d2b"
+      url: "https://github.com/daslaller/Dart_LSP_Client.git"
+    source: git
     version: "0.1.0"
   matcher:
     dependency: transitive
@@ -234,9 +236,11 @@ packages:
   parser_client:
     dependency: "direct main"
     description:
-      path: "packages/parser_client"
-      relative: true
-    source: path
+      path: "clients/dart"
+      ref: "HEAD"
+      resolved-ref: "bc1c6f27b3f7d7554eeac95dbba9b7b86bc10e3c"
+      url: "https://github.com/daslaller/krom-parser.git"
+    source: git
     version: "0.1.0"
   path:
     dependency: "direct main"

@@ -40,6 +40,8 @@ class _EditorPageState extends State<EditorPage> {
 
   final Map<String, KromAnalyzer> _analyzers = {};
   final Map<String, KromAutocompleter> _autocompleters = {};
+  // Structural selection stack — Shift+Alt+→ pushes, Shift+Alt+← pops.
+  final List<TextSelection> _selectionStack = [];
 
   String? _rootPath;
   bool _showPalette = false;
@@ -48,6 +50,7 @@ class _EditorPageState extends State<EditorPage> {
   @override
   void initState() {
     super.initState();
+    _tabController.addListener(_onTabChanged);
     _settings.load().then((_) async {
       _useParser = _settings.useTreeSitter;
       await _parserService.initialize();
@@ -57,6 +60,7 @@ class _EditorPageState extends State<EditorPage> {
 
   @override
   void dispose() {
+    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _panelController.dispose();
     _paletteController.dispose();
@@ -71,6 +75,8 @@ class _EditorPageState extends State<EditorPage> {
     _parserService.dispose();
     super.dispose();
   }
+
+  void _onTabChanged() => _selectionStack.clear();
 
   Future<void> _openFolder(String path) async {
     _rootPath = path;
@@ -266,6 +272,94 @@ class _EditorPageState extends State<EditorPage> {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Structural selection — Shift+Alt+→ / Shift+Alt+←
+  // ---------------------------------------------------------------------------
+
+  void _expandSelection() {
+    final tab = _tabController.activeTab;
+    if (tab == null) return;
+    final controller = tab.codeController;
+    final text = controller.fullText;
+    final current = controller.selection;
+    if (!current.isValid) return;
+
+    final next = _findEnclosingBrackets(text, current);
+    if (next == null) return;
+
+    _selectionStack.add(current);
+    controller.selection = next;
+  }
+
+  void _shrinkSelection() {
+    if (_selectionStack.isEmpty) return;
+    final tab = _tabController.activeTab;
+    if (tab == null) return;
+    tab.codeController.selection = _selectionStack.removeLast();
+  }
+
+  /// Finds the smallest bracket pair `()`, `[]`, `{}` that fully encloses
+  /// [selection]. Returns the selection inside those brackets on the first
+  /// call; if [selection] already equals that inner range, returns the range
+  /// inclusive of the brackets themselves.
+  static TextSelection? _findEnclosingBrackets(
+    String text,
+    TextSelection selection,
+  ) {
+    const opens = '({[';
+    const closes = ')}]';
+
+    final start = selection.start;
+    final end = selection.end;
+
+    // Walk backwards from start to find the nearest unmatched opening bracket.
+    var depth = 0;
+    for (var i = start - 1; i >= 0; i--) {
+      final c = text[i];
+      final closeIdx = closes.indexOf(c);
+      if (closeIdx >= 0) {
+        depth++;
+        continue;
+      }
+      final openIdx = opens.indexOf(c);
+      if (openIdx < 0) continue;
+
+      if (depth > 0) {
+        depth--;
+        continue;
+      }
+
+      // Found an unmatched opening bracket at i. Scan forward for its match.
+      final matchClose = closes[openIdx];
+      var inner = 0;
+      for (var j = i + 1; j < text.length; j++) {
+        if (text[j] == text[i]) {
+          inner++;
+        } else if (text[j] == matchClose) {
+          if (inner > 0) {
+            inner--;
+            continue;
+          }
+          // j is the closing bracket. Offer inner range first, then outer.
+          final innerSel = TextSelection(baseOffset: i + 1, extentOffset: j);
+          if (selection.start == i + 1 && selection.end == j) {
+            // Already selecting inside — expand to include brackets.
+            return TextSelection(baseOffset: i, extentOffset: j + 1);
+          }
+          // Does the closing bracket come after (or at) the current end?
+          if (j >= end) return innerSel;
+          break;
+        }
+      }
+      break;
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     return Shortcuts(
@@ -274,6 +368,8 @@ class _EditorPageState extends State<EditorPage> {
             const _PaletteIntent(),
         const SingleActivator(LogicalKeyboardKey.keyB, control: true):
             const _FileTreeIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyO, control: true, shift: true):
+            const _OutlineIntent(),
         const SingleActivator(LogicalKeyboardKey.keyS, control: true):
             const _SaveIntent(),
         const SingleActivator(LogicalKeyboardKey.keyW, control: true):
@@ -288,6 +384,16 @@ class _EditorPageState extends State<EditorPage> {
             const _FindReferencesIntent(),
         const SingleActivator(LogicalKeyboardKey.keyF, alt: true, shift: true):
             const _FormatIntent(),
+        const SingleActivator(
+          LogicalKeyboardKey.arrowRight,
+          shift: true,
+          alt: true,
+        ): const _ExpandSelectionIntent(),
+        const SingleActivator(
+          LogicalKeyboardKey.arrowLeft,
+          shift: true,
+          alt: true,
+        ): const _ShrinkSelectionIntent(),
       },
       child: Actions(
         actions: {
@@ -296,6 +402,9 @@ class _EditorPageState extends State<EditorPage> {
           ),
           _FileTreeIntent: CallbackAction<_FileTreeIntent>(
             onInvoke: (_) => _panelController.toggle(PanelType.fileTree),
+          ),
+          _OutlineIntent: CallbackAction<_OutlineIntent>(
+            onInvoke: (_) => _panelController.toggle(PanelType.outline),
           ),
           _SaveIntent: CallbackAction<_SaveIntent>(
             onInvoke: (_) => _saveActiveFile(),
@@ -325,6 +434,18 @@ class _EditorPageState extends State<EditorPage> {
           _FormatIntent: CallbackAction<_FormatIntent>(
             onInvoke: (_) => _formatDocument(),
           ),
+          _ExpandSelectionIntent: CallbackAction<_ExpandSelectionIntent>(
+            onInvoke: (_) {
+              _expandSelection();
+              return null;
+            },
+          ),
+          _ShrinkSelectionIntent: CallbackAction<_ShrinkSelectionIntent>(
+            onInvoke: (_) {
+              _shrinkSelection();
+              return null;
+            },
+          ),
         },
         child: Focus(
           focusNode: _focusNode,
@@ -340,6 +461,7 @@ class _EditorPageState extends State<EditorPage> {
                         children: [
                           PanelHost(
                             panelController: _panelController,
+                            tabController: _tabController,
                             rootPath: _rootPath,
                             onFileSelected: _openFile,
                           ),
@@ -405,6 +527,12 @@ class _EditorPageState extends State<EditorPage> {
             label: 'Toggle File Tree',
             shortcut: 'Ctrl+B',
             onTap: () => _panelController.toggle(PanelType.fileTree),
+          ),
+          const SizedBox(height: 8),
+          _EmptyStateAction(
+            label: 'Toggle Outline',
+            shortcut: 'Ctrl+Shift+O',
+            onTap: () => _panelController.toggle(PanelType.outline),
           ),
         ],
       ),
@@ -478,6 +606,10 @@ class _FileTreeIntent extends Intent {
   const _FileTreeIntent();
 }
 
+class _OutlineIntent extends Intent {
+  const _OutlineIntent();
+}
+
 class _SaveIntent extends Intent {
   const _SaveIntent();
 }
@@ -504,4 +636,12 @@ class _FindReferencesIntent extends Intent {
 
 class _FormatIntent extends Intent {
   const _FormatIntent();
+}
+
+class _ExpandSelectionIntent extends Intent {
+  const _ExpandSelectionIntent();
+}
+
+class _ShrinkSelectionIntent extends Intent {
+  const _ShrinkSelectionIntent();
 }

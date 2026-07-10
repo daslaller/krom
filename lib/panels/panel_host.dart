@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
+import '../editor/tab_controller.dart';
 import '../theme/krom_colors.dart';
 import 'panel_controller.dart';
 import 'file_tree/file_tree_panel.dart';
+import 'outline/outline_panel.dart';
 
 class PanelHost extends StatelessWidget {
   const PanelHost({
     super.key,
     required this.panelController,
+    required this.tabController,
     required this.onFileSelected,
     required this.rootPath,
   });
 
   final PanelController panelController;
+  final KromTabController tabController;
   final void Function(String path) onFileSelected;
   final String? rootPath;
 
@@ -40,6 +44,7 @@ class PanelHost extends StatelessWidget {
           rootPath: rootPath,
           onFileSelected: onFileSelected,
         ),
+      PanelType.outline => OutlinePanel(tabController: tabController),
       null => const SizedBox.shrink(),
     };
   }

@@ -54,6 +54,12 @@ class KromTabController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void previousTab() {
+    if (_tabs.length < 2) return;
+    _activeIndex = (_activeIndex - 1 + _tabs.length) % _tabs.length;
+    notifyListeners();
+  }
+
   void markDirty(int index) {
     if (index < 0 || index >= _tabs.length) return;
     if (!_tabs[index].isDirty) {

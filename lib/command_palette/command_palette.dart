@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 import '../theme/krom_colors.dart';
 import '../theme/typography.dart';
 import 'command_palette_controller.dart';
+import 'palette_item.dart';
 
 class CommandPalette extends StatefulWidget {
   const CommandPalette({
@@ -47,9 +48,9 @@ class _CommandPaletteState extends State<CommandPalette> {
     } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
       widget.controller.moveDown();
     } else if (event.logicalKey == LogicalKeyboardKey.enter) {
-      final path = widget.controller.confirm();
-      if (path != null) {
-        widget.onFileSelected(path);
+      final item = widget.controller.confirm();
+      if (item is PaletteFileItem) {
+        widget.onFileSelected(item.path);
         widget.onDismiss();
       }
     } else if (event.logicalKey == LogicalKeyboardKey.escape) {
@@ -142,8 +143,8 @@ class _CommandPaletteState extends State<CommandPalette> {
     return ListenableBuilder(
       listenable: widget.controller,
       builder: (context, _) {
-        final paths = widget.controller.filteredPaths;
-        if (paths.isEmpty) {
+        final items = widget.controller.items;
+        if (items.isEmpty) {
           return Padding(
             padding: const EdgeInsets.all(20),
             child: Text(
@@ -157,12 +158,14 @@ class _CommandPaletteState extends State<CommandPalette> {
           child: ListView.builder(
             shrinkWrap: true,
             padding: const EdgeInsets.fromLTRB(6, 0, 6, 6),
-            itemCount: paths.length,
+            itemCount: items.length,
             itemBuilder: (context, index) {
+              final item = items[index];
+              if (item is! PaletteFileItem) return const SizedBox.shrink();
               final isSelected = index == widget.controller.selectedIndex;
               return GestureDetector(
                 onTap: () {
-                  widget.onFileSelected(paths[index]);
+                  widget.onFileSelected(item.path);
                   widget.onDismiss();
                 },
                 child: Container(
@@ -176,7 +179,7 @@ class _CommandPaletteState extends State<CommandPalette> {
                   ),
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    _relativePath(paths[index]),
+                    _relativePath(item.path),
                     overflow: TextOverflow.ellipsis,
                     style: KromTypography.ui(
                       color: isSelected

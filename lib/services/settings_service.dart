@@ -58,6 +58,30 @@ class SettingsService {
   /// Whether to prefer krom-parser over highlight.js for syntax highlighting.
   bool get useTreeSitter => _data['useTreeSitter'] as bool? ?? true;
 
+  /// UI theme id: `dark` (Midnight Indigo) or `light` (Paper Light).
+  String get themeId => _data['theme'] as String? ?? 'dark';
+
+  bool get isDark => themeId != 'light';
+
+  /// Autosave dirty files after edits settle.
+  bool get autosave => _data['autosave'] as bool? ?? true;
+
+  Future<void> setTheme(String theme) async {
+    _data['theme'] = theme;
+    await _save();
+  }
+
+  Future<void> setAutosave(bool enabled) async {
+    _data['autosave'] = enabled;
+    await _save();
+  }
+
+  Future<void> _save() async {
+    final file = _settingsFile();
+    await file.parent.create(recursive: true);
+    await file.writeAsString(const JsonEncoder.withIndent('  ').convert(_data));
+  }
+
   static const _defaults = <String, List<String>>{
     'dart': ['dart', 'language-server', '--protocol=lsp'],
     // Configure additional servers in settings.json, e.g.:

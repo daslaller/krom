@@ -1,28 +1,27 @@
 import 'package:flutter/material.dart';
-import 'package:path/path.dart' as p;
 
+import '../../../services/git_service.dart';
 import '../../../panels/file_tree/file_tree_node.dart';
 import '../../../panels/file_tree/file_tree_service.dart';
+import '../file_label.dart';
 import '../ide_concepts_theme.dart';
+import '../ide_fonts.dart';
 
-/// File explorer sidebar. Reuses [FileTreeService]/[FileTreeNode] for real
-/// directory data; visual treatment matches the mockup:
-///  - dots are always colored by extension, but small + grey unless the
-///    file is the one currently open in the active tab.
-///  - extension text is always colored by extension (never dimmed), so a
-///    given filetype reads the same color everywhere.
+/// File explorer with Tacet-style type tags and git footer.
 class IdeConceptsSidebar extends StatefulWidget {
   const IdeConceptsSidebar({
     super.key,
     required this.theme,
     required this.rootPath,
     required this.activeFilePath,
+    required this.gitStatus,
     required this.onFileSelected,
   });
 
   final IdeConceptsTheme theme;
   final String? rootPath;
   final String? activeFilePath;
+  final GitStatus gitStatus;
   final void Function(String path) onFileSelected;
 
   @override
@@ -57,8 +56,7 @@ class _IdeConceptsSidebarState extends State<IdeConceptsSidebar> {
   Widget build(BuildContext context) {
     final theme = widget.theme;
     return Container(
-      width: 208,
-      padding: const EdgeInsets.symmetric(vertical: 14),
+      width: 236,
       decoration: BoxDecoration(
         color: theme.sidebarBg,
         border: Border(right: BorderSide(color: theme.hairline)),
@@ -67,42 +65,27 @@ class _IdeConceptsSidebarState extends State<IdeConceptsSidebar> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-            child: Text(
-              'Explorer',
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.08 * 10.5,
-                color: theme.muted,
-              ),
-            ),
-          ),
-          Expanded(child: _buildBody(theme)),
-          Container(
-            margin: const EdgeInsets.only(top: 10),
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            decoration: BoxDecoration(
-              border: Border(top: BorderSide(color: theme.hairline)),
-            ),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
             child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Container(
-                  width: 7,
-                  height: 7,
-                  decoration: BoxDecoration(
-                    color: theme.accent2,
-                    shape: BoxShape.circle,
+                Text(
+                  'krom',
+                  style: IdeFonts.mono(
+                    fontSize: 12,
+                    weight: FontWeight.w600,
+                    color: theme.text,
                   ),
                 ),
-                const SizedBox(width: 8),
                 Text(
-                  'main · clean',
-                  style: TextStyle(fontSize: 11.5, color: theme.muted),
+                  'explorer',
+                  style: IdeFonts.mono(fontSize: 10, color: theme.iconDim),
                 ),
               ],
             ),
           ),
+          Expanded(child: _buildBody(theme)),
+          _GitFooter(theme: theme, gitStatus: widget.gitStatus),
         ],
       ),
     );
@@ -113,7 +96,7 @@ class _IdeConceptsSidebarState extends State<IdeConceptsSidebar> {
       return Center(
         child: Text(
           'No folder open',
-          style: TextStyle(fontSize: 12.5, color: theme.iconDim),
+          style: IdeFonts.mono(fontSize: 12.5, color: theme.iconDim),
         ),
       );
     }
@@ -132,7 +115,7 @@ class _IdeConceptsSidebarState extends State<IdeConceptsSidebar> {
     final root = _root;
     if (root == null) return const SizedBox.shrink();
     return ListView(
-      padding: EdgeInsets.zero,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
       children: [
         for (final child in root.children)
           _NodeRow(
@@ -143,6 +126,65 @@ class _IdeConceptsSidebarState extends State<IdeConceptsSidebar> {
             onFileSelected: widget.onFileSelected,
           ),
       ],
+    );
+  }
+}
+
+class _GitFooter extends StatelessWidget {
+  const _GitFooter({required this.theme, required this.gitStatus});
+
+  final IdeConceptsTheme theme;
+  final GitStatus gitStatus;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!gitStatus.isRepo) return const SizedBox.shrink();
+
+    final changesLabel = gitStatus.modifiedCount == 0
+        ? 'clean'
+        : '${gitStatus.modifiedCount} modified';
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: theme.hairline)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'branch',
+                style: IdeFonts.mono(fontSize: 10.5, color: theme.iconDim),
+              ),
+              Text(
+                gitStatus.branch ?? '—',
+                style: IdeFonts.mono(fontSize: 10.5, color: theme.muted),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'changes',
+                style: IdeFonts.mono(fontSize: 10.5, color: theme.iconDim),
+              ),
+              Text(
+                changesLabel,
+                style: IdeFonts.mono(
+                  fontSize: 10.5,
+                  color: gitStatus.modifiedCount > 0
+                      ? theme.accent2
+                      : theme.muted,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -174,21 +216,10 @@ class _NodeRowState extends State<_NodeRow> {
     final node = widget.node;
     final theme = widget.theme;
     final isActive = !node.isDirectory && node.path == widget.activeFilePath;
-
-    final ext = node.isDirectory ? null : p.extension(node.name);
-    final hasExt = ext != null && ext.isNotEmpty;
-    final base = hasExt
-        ? node.name.substring(0, node.name.length - ext.length)
-        : node.name;
-    final extText = hasExt ? ext : '';
-    final extColor = hasExt
-        ? theme.colorForExtension(ext.substring(1))
+    final parts = FileLabelParts.fromFileName(node.name);
+    final extColor = parts.extKey != null
+        ? theme.colorForExtension(parts.extKey)
         : theme.muted;
-
-    final dotColor = isActive
-        ? (hasExt ? theme.colorForExtension(ext.substring(1)) : theme.accent)
-        : theme.iconDim;
-    final dotSize = isActive ? 6.0 : 3.0;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -206,69 +237,84 @@ class _NodeRowState extends State<_NodeRow> {
                 widget.onFileSelected(node.path);
               }
             },
-            child: Container(
-              padding: EdgeInsets.only(
-                left: 16.0 + widget.depth * 14,
-                right: 16,
-                top: 6,
-                bottom: 6,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              margin: EdgeInsets.only(left: widget.depth * 12.0),
+              padding: EdgeInsets.fromLTRB(
+                node.isDirectory ? 8 : 21,
+                5,
+                8,
+                5,
               ),
-              color: isActive
-                  ? theme.rowActive
-                  : (_hovered ? theme.rowHover : Colors.transparent),
+              decoration: BoxDecoration(
+                color: isActive
+                    ? theme.rowActive
+                    : (_hovered ? theme.rowHover : Colors.transparent),
+                borderRadius: BorderRadius.circular(6),
+              ),
               child: Row(
                 children: [
                   if (node.isDirectory)
-                    Icon(
-                      node.isExpanded
-                          ? Icons.keyboard_arrow_down
-                          : Icons.keyboard_arrow_right,
-                      size: 14,
-                      color: theme.iconDim,
+                    Text(
+                      node.isExpanded ? '▼' : '▶',
+                      style: IdeFonts.mono(fontSize: 8, color: theme.iconDim),
                     )
-                  else
-                    SizedBox(
-                      width: 12,
-                      child: Center(
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 120),
-                          width: dotSize,
-                          height: dotSize,
-                          decoration: BoxDecoration(
-                            color: dotColor,
-                            shape: BoxShape.circle,
-                            boxShadow: isActive
-                                ? [
-                                    BoxShadow(
-                                      color: dotColor.withValues(alpha: 0.13),
-                                      spreadRadius: 3,
-                                    ),
-                                  ]
-                                : null,
+                  else ...[
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 120),
+                      width: 5,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: isActive ? theme.accent : theme.iconDim,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    if (parts.tag.isNotEmpty)
+                      SizedBox(
+                        width: 22,
+                        child: Text(
+                          parts.tag,
+                          style: IdeFonts.mono(
+                            fontSize: 9,
+                            color: extColor.withValues(alpha: 0.85),
                           ),
                         ),
                       ),
-                    ),
-                  const SizedBox(width: 8),
+                  ],
+                  if (node.isDirectory) const SizedBox(width: 7),
                   Expanded(
-                    child: Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(
-                            text: base,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: isActive ? theme.text : theme.muted,
+                    child: node.isDirectory
+                        ? Text(
+                            node.name,
+                            style: IdeFonts.mono(
+                              fontSize: 12,
+                              weight: FontWeight.w500,
+                              color: theme.muted,
                             ),
+                          )
+                        : Text.rich(
+                            TextSpan(
+                              children: [
+                                TextSpan(
+                                  text: parts.base,
+                                  style: IdeFonts.mono(
+                                    fontSize: 12.5,
+                                    color: isActive ? theme.text : theme.muted,
+                                  ),
+                                ),
+                                if (parts.ext.isNotEmpty)
+                                  TextSpan(
+                                    text: parts.ext,
+                                    style: IdeFonts.mono(
+                                      fontSize: 12.5,
+                                      color: extColor,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          TextSpan(
-                            text: extText,
-                            style: TextStyle(fontSize: 13, color: extColor),
-                          ),
-                        ],
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
                   ),
                 ],
               ),

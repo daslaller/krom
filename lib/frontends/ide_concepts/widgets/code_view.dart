@@ -6,22 +6,22 @@ import '../../../editor/tab_model.dart';
 import '../../../services/lsp_service.dart';
 import '../ide_concepts_code_theme.dart';
 import '../ide_concepts_theme.dart';
+import '../ide_fonts.dart';
 
-/// Code editing surface for the IDE Concepts frontend. Reuses the same
-/// [TabModel.codeController] (and therefore all real editing, LSP and
-/// tree-sitter highlighting behavior) as the default frontend — only the
-/// gutter/text styling is swapped to match the mockup's palette.
+/// Code editing surface with optional focus-mode column constraint.
 class IdeConceptsCodeView extends StatelessWidget {
   const IdeConceptsCodeView({
     super.key,
     required this.theme,
     required this.tab,
+    this.focusOn = false,
     this.onChanged,
     this.lspService,
   });
 
   final IdeConceptsTheme theme;
   final TabModel tab;
+  final bool focusOn;
   final VoidCallback? onChanged;
   final LspService? lspService;
 
@@ -31,9 +31,7 @@ class IdeConceptsCodeView extends StatelessWidget {
       data: buildIdeConceptsCodeTheme(theme),
       child: CodeField(
         controller: tab.codeController,
-        textStyle: TextStyle(
-          fontFamily: 'JetBrains Mono',
-          fontFamilyFallback: const ['Cascadia Code', 'Consolas', 'monospace'],
+        textStyle: IdeFonts.mono(
           fontSize: 13.5,
           height: 24 / 13.5,
           color: theme.syntax['plain'] ?? theme.text,
@@ -44,33 +42,35 @@ class IdeConceptsCodeView extends StatelessWidget {
           showErrors: true,
           width: 46,
           margin: 14,
-          textStyle: TextStyle(
-            fontFamily: 'JetBrains Mono',
-            fontFamilyFallback: const [
-              'Cascadia Code',
-              'Consolas',
-              'monospace',
-            ],
-            fontSize: 13.5,
-            color: theme.lineNum,
-          ),
+          textStyle: IdeFonts.mono(fontSize: 13.5, color: theme.lineNum),
           background: theme.editorBg,
         ),
         background: theme.editorBg,
-        padding: const EdgeInsets.symmetric(vertical: 18),
+        padding: EdgeInsets.symmetric(vertical: focusOn ? 56 : 18),
         onChanged: onChanged != null ? (_) => onChanged!() : null,
       ),
     );
 
-    if (lspService != null && lspService!.isAvailable) {
-      return HoverTooltip(
-        lspService: lspService!,
-        controller: tab.codeController,
-        filePath: tab.filePath,
-        child: field,
-      );
-    }
+    final editor = lspService != null && lspService!.isAvailable
+        ? HoverTooltip(
+            lspService: lspService!,
+            controller: tab.codeController,
+            filePath: tab.filePath,
+            child: field,
+          )
+        : field;
 
-    return field;
+    return ColoredBox(
+      color: theme.editorBg,
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: focusOn ? 860 : double.infinity,
+          ),
+          child: editor,
+        ),
+      ),
+    );
   }
 }

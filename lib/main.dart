@@ -61,7 +61,12 @@ class _KromAppState extends State<KromApp> {
         data: KromTheme.fromIdeConcepts(t, uiFontSize: ui),
         child: IdeConceptsPage(
           settings: _settings, themeId: _themeId, theme: t,
-          onCycleTheme: () async { final n = IdeConceptsThemes.nextId(_themeId); setState(() => _themeId = n); await _settings.setTheme(n); },
+          onCycleTheme: () async {
+            final n = IdeConceptsThemes.nextId(_themeId);
+            if (n == null) return;
+            setState(() => _themeId = n);
+            await _settings.setTheme(n);
+          },
           onSetTheme: (id) async { setState(() => _themeId = IdeConceptsThemes.normalizeId(id)); await _settings.setTheme(_themeId); },
           onSetAccentIndex: (i) async { setState(() {}); await _settings.setAccentIndex(i); },
           onSetHighContrast: (v) async { setState(() {}); await _settings.setHighContrast(v); },

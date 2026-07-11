@@ -197,7 +197,7 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
   }
 
   String get _workspaceName =>
-      _session.rootPath?.split(Platform.filePathSeparator).last ?? 'Krom';
+      _session.rootPath?.split(Platform.pathSeparator).last ?? 'Krom';
 
   String get _activePath {
     final tab = _session.tabController.activeTab;

@@ -41,3 +41,12 @@ Standard Flutter/Dart commands apply; only the non-obvious cloud caveats are cap
   `flutter run`) to re-index.
 - `Dart_LSP_Client` must be a standalone `lsp_client` package repo (not the full
   krom app). Bootstrap source lives in `docs/dart_lsp_client-bootstrap/` if needed.
+- Pre-existing failures unrelated to the environment (do NOT "fix" as setup work):
+  - `flutter test` reports the root widget test `App boots and shows empty-state
+    actions` (`test/widget_test.dart`) as failing: on the default 800x600 test
+    surface an `_EmptyStateAction` `Row` overflows and `find.text('Krom')` matches
+    3 widgets instead of the expected 1. The other 9 checks in the file pass.
+  - `flutter analyze` reports errors only from `docs/dart_lsp_client-bootstrap/`
+    (e.g. `test/lsp_client_test.dart` — `undefined_function: expect/group/test`).
+    That folder is bootstrap source, not a wired-up package, so it lacks the
+    `test` dependency; `lib/` code yields only warnings/infos.

@@ -207,6 +207,36 @@ class LspService {
     return client.getDocumentSymbols(uri: Uri.file(filePath));
   }
 
+  Future<LspPrepareRenameResult?> prepareRename(
+    String filePath,
+    int line,
+    int character,
+  ) async {
+    final client = _clientForPath(filePath);
+    if (client == null) return null;
+    return client.prepareRename(
+      uri: Uri.file(filePath),
+      line: line,
+      character: character,
+    );
+  }
+
+  Future<LspWorkspaceEdit?> rename(
+    String filePath,
+    int line,
+    int character,
+    String newName,
+  ) async {
+    final client = _clientForPath(filePath);
+    if (client == null) return null;
+    return client.rename(
+      uri: Uri.file(filePath),
+      line: line,
+      character: character,
+      newName: newName,
+    );
+  }
+
   // ── Internal ──────────────────────────────────────────────────────────────
 
   void _flushChange(String path) {

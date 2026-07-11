@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'frontends/ide_concepts/ide_concepts_page.dart';
 import 'frontends/ide_concepts/ide_concepts_theme.dart';
 import 'frontends/ide_concepts/ide_concepts_themes.dart';
+import 'frontends/ide_concepts/krom_motion.dart';
 import 'services/settings_service.dart';
 import 'theme/krom_theme.dart';
 
@@ -60,11 +61,16 @@ class _KromAppState extends State<KromApp> {
       title: 'Krom',
       debugShowCheckedModeBanner: false,
       theme: KromTheme.fromIdeConcepts(conceptsTheme),
-      home: IdeConceptsPage(
+      home: AnimatedTheme(
+        duration: KromMotion.themeDuration,
+        curve: KromMotion.chromeCurve,
+        data: KromTheme.fromIdeConcepts(conceptsTheme),
+        child: IdeConceptsPage(
         settings: _settings,
         themeId: _themeId,
         onCycleTheme: _cycleTheme,
         onSetTheme: _setThemeId,
+      ),
       ),
     );
   }

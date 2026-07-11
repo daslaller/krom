@@ -7,6 +7,7 @@ import '../../../command_palette/command_palette_controller.dart';
 import '../../../command_palette/palette_item.dart';
 import '../ide_concepts_theme.dart';
 import '../ide_fonts.dart';
+import '../krom_motion.dart';
 
 /// Command palette with commands, recent files, and fuzzy file search.
 class IdeConceptsCommandPalette extends StatefulWidget {
@@ -209,7 +210,13 @@ class _IdeConceptsCommandPaletteState extends State<IdeConceptsCommandPalette>
             itemBuilder: (context, index) {
               final item = items[index];
               final isSelected = index == widget.controller.selectedIndex;
-              return MouseRegion(
+              return TweenAnimationBuilder<double>(
+                key: ValueKey('$index-${item.label}'),
+                tween: Tween(begin: 0.0, end: 1.0),
+                duration: KromMotion.paletteDuration + KromMotion.paletteStaggerDelay * index,
+                curve: KromMotion.paletteCurve,
+                builder: (context, value, child) => Opacity(opacity: value, child: Transform.translate(offset: Offset(0, (1 - value) * 6), child: child)),
+                child: MouseRegion(
                 onEnter: (_) => widget.controller.setSelectedIndex(index),
                 child: GestureDetector(
                   onTap: () {
@@ -272,6 +279,7 @@ class _IdeConceptsCommandPaletteState extends State<IdeConceptsCommandPalette>
                     ),
                   ),
                 ),
+              ),
               );
             },
           ),

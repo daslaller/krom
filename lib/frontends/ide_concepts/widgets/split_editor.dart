@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lsp_client/lsp_client.dart';
 import '../ide_concepts_theme.dart';
 
+import '../../../editor/navigation_pulse.dart';
 import '../../../editor/tab_controller.dart';
 import '../../../editor/tab_model.dart';
 import '../../../services/lsp_service.dart';
@@ -21,6 +22,9 @@ class SplitEditorView extends StatelessWidget {
     required this.lspService,
     required this.onChanged,
     this.onSignatureHelp,
+    this.navigationPulse,
+    this.editorFontSize = 13.5,
+    this.editorLineHeight = 24 / 13.5,
     this.secondaryIndex,
   });
 
@@ -31,6 +35,9 @@ class SplitEditorView extends StatelessWidget {
   final LspService lspService;
   final VoidCallback onChanged;
   final Future<LspSignatureHelp?> Function()? onSignatureHelp;
+  final NavigationPulse? navigationPulse;
+  final double editorFontSize;
+  final double editorLineHeight;
   final int? secondaryIndex;
 
   @override
@@ -98,6 +105,9 @@ class SplitEditorView extends StatelessWidget {
             tab: tab,
             focusOn: focusOn,
             lspService: lspService,
+            navigationPulse: navigationPulse,
+            editorFontSize: editorFontSize,
+            editorLineHeight: editorLineHeight,
             onChanged: onChanged,
             onSignatureHelp: onSignatureHelp,
           ),

@@ -7,7 +7,9 @@ import 'package:lsp_client/lsp_client.dart';
 import '../command_palette/command_palette_controller.dart';
 import '../panels/file_tree/file_tree_service.dart';
 import '../services/file_service.dart';
+import '../services/ghost_completion_service.dart';
 import '../services/git_service.dart';
+import '../services/live_share_service.dart';
 import '../services/lsp_service.dart';
 import '../services/parser_service.dart';
 import '../services/problems_collector.dart';
@@ -15,6 +17,7 @@ import '../services/settings_service.dart';
 import '../utils/text_position.dart';
 import 'krom_analyzer.dart';
 import 'krom_autocompleter.dart';
+import 'navigation_pulse.dart';
 import 'tab_controller.dart';
 
 /// Shared editor backend: tabs, LSP, parser, saves, and navigation.
@@ -30,6 +33,9 @@ class EditorSession extends ChangeNotifier {
         gitService = GitService() {
     lspService = LspService(this.settings);
     parserService = ParserService(this.settings);
+    ghostCompletionService =
+        GhostCompletionService(settings: this.settings);
+    liveShareService = LiveShareService();
   }
 
   final SettingsService settings;
@@ -41,6 +47,8 @@ class EditorSession extends ChangeNotifier {
   late final LspService lspService;
   late final ParserService parserService;
   final ProblemsCollector problemsCollector = ProblemsCollector();
+  late final GhostCompletionService ghostCompletionService;
+  late final LiveShareService liveShareService;
 
   final Map<String, KromAnalyzer> _analyzers = {};
   final Map<String, KromAutocompleter> _autocompleters = {};
@@ -48,6 +56,7 @@ class EditorSession extends ChangeNotifier {
   String? rootPath;
   GitStatus gitStatus = const GitStatus();
   bool useParser = true;
+  final NavigationPulse navigationPulse = NavigationPulse();
   Timer? _autosaveTimer;
 
   Future<void> initialize() async {
@@ -84,6 +93,7 @@ class EditorSession extends ChangeNotifier {
           revealLine,
           character: revealCharacter ?? 0,
         );
+        navigationPulse.pulse(revealLine);
       }
       paletteController.noteRecentFile(path);
       notifyListeners();
@@ -101,6 +111,7 @@ class EditorSession extends ChangeNotifier {
           revealLine,
           character: revealCharacter ?? 0,
         );
+        navigationPulse.pulse(revealLine);
       }
       notifyListeners();
     } catch (_) {}
@@ -246,6 +257,12 @@ class EditorSession extends ChangeNotifier {
     if (offset < 0) return;
     final text = tab.codeController.fullText;
     final (line, character) = offsetToLineChar(text, offset);
+    await openReferencesAt(line, character);
+  }
+
+  Future<void> openReferencesAt(int line, int character) async {
+    final tab = tabController.activeTab;
+    if (tab == null) return;
     final locations = await lspService.getReferences(
       tab.filePath,
       line,
@@ -278,7 +295,9 @@ class EditorSession extends ChangeNotifier {
   void goToLine(int line) {
     final tab = tabController.activeTab;
     if (tab == null) return;
-    tab.codeController.revealPosition(line.clamp(0, 1 << 20));
+    final clamped = line.clamp(0, 1 << 20);
+    tab.codeController.revealPosition(clamped);
+    navigationPulse.pulse(clamped);
     notifyListeners();
   }
 
@@ -354,6 +373,8 @@ class EditorSession extends ChangeNotifier {
     _autosaveTimer?.cancel();
     tabController.dispose();
     paletteController.dispose();
+    ghostCompletionService.dispose();
+    liveShareService.dispose();
     for (final a in _analyzers.values) {
       a.dispose();
     }

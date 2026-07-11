@@ -68,6 +68,19 @@ class SettingsService {
 
   /// Autosave dirty files after edits settle.
   bool get autosave => _data['autosave'] as bool? ?? true;
+  bool get themeSyncOs => _data['themeSyncOs'] as bool? ?? false;
+  bool get highContrast => _data['highContrast'] as bool? ?? false;
+  int get accentIndex => (_data['accentIndex'] as num?)?.toInt() ?? 0;
+  double get editorFontSize => (_data['editorFontSize'] as num?)?.toDouble() ?? 13.5;
+  double get editorLineHeight => (_data['editorLineHeight'] as num?)?.toDouble() ?? 24 / 13.5;
+  double get uiFontSize => (_data['uiFontSize'] as num?)?.toDouble() ?? 13.0;
+
+  String? get anthropicApiKey => _data['anthropicApiKey'] as String?;
+  String? get githubToken => _data['githubToken'] as String?;
+  bool get hasAnthropicKey {
+    final key = anthropicApiKey;
+    return key != null && key.isNotEmpty;
+  }
 
   Future<void> setTheme(String theme) async {
     _data['theme'] = theme;
@@ -78,6 +91,10 @@ class SettingsService {
     _data['autosave'] = enabled;
     await _save();
   }
+
+  Future<void> setThemeSyncOs(bool v) async { _data['themeSyncOs'] = v; await _save(); }
+  Future<void> setHighContrast(bool v) async { _data['highContrast'] = v; await _save(); }
+  Future<void> setAccentIndex(int i) async { _data['accentIndex'] = i.clamp(0, 3); await _save(); }
 
   Future<void> _save() async {
     final file = _settingsFile();

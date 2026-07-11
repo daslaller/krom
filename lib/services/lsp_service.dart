@@ -29,7 +29,8 @@ class LspService {
   final Map<String, String> _pendingLanguageId = {};
 
   bool get isAvailable => _clients.isNotEmpty;
-
+  bool get semanticTokensSupported => false;
+  Future<List<SemanticTokenSpan>> semanticTokenSpans(String path) async => const [];
   Iterable<String> get activeLanguages => _clients.keys;
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -320,4 +321,9 @@ class LspService {
     '.sql': 'sql',
     '.lua': 'lua',
   };
+}
+
+class SemanticTokenSpan {
+  const SemanticTokenSpan({required this.start, required this.length, required this.tokenType});
+  final int start, length; final String tokenType;
 }

@@ -4,15 +4,17 @@ import 'package:lsp_client/lsp_client.dart';
 
 import '../../../editor/hover_tooltip.dart';
 import '../../../editor/indent_guides.dart';
+import '../../../editor/navigation_pulse.dart';
 import '../../../editor/tab_model.dart';
 import '../../../services/lsp_service.dart';
 import '../ide_concepts_code_theme.dart';
 import '../ide_concepts_theme.dart';
 import '../ide_fonts.dart';
+import '../krom_motion.dart';
 import 'editor_minimap.dart';
 import 'signature_help_popup.dart';
 
-/// Code editing surface with indent guides, minimap, and signature help.
+/// Code editing surface with indent guides, minimap, signature help, and motion.
 class IdeConceptsCodeView extends StatefulWidget {
   const IdeConceptsCodeView({
     super.key,
@@ -22,6 +24,9 @@ class IdeConceptsCodeView extends StatefulWidget {
     this.onChanged,
     this.lspService,
     this.onSignatureHelp,
+    this.navigationPulse,
+    this.editorFontSize = 13.5,
+    this.editorLineHeight = 24 / 13.5,
   });
 
   final IdeConceptsTheme theme;
@@ -30,14 +35,16 @@ class IdeConceptsCodeView extends StatefulWidget {
   final VoidCallback? onChanged;
   final LspService? lspService;
   final Future<LspSignatureHelp?> Function()? onSignatureHelp;
+  final NavigationPulse? navigationPulse;
+  final double editorFontSize;
+  final double editorLineHeight;
 
   @override
   State<IdeConceptsCodeView> createState() => _IdeConceptsCodeViewState();
 }
 
-class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView> {
-  static const _lineHeight = 24.0;
-  static const _fontSize = 13.5;
+class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView>
+    with SingleTickerProviderStateMixin {
   static const _gutterWidth = 60.0;
   static const _horizontalPad = 12.0;
 
@@ -46,11 +53,20 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView> {
   double _viewportExtent = 1;
   double _maxScrollExtent = 1;
   LspSignatureHelp? _signatureHelp;
+  late final AnimationController _pulseController;
+
+  double get _fontSize => widget.editorFontSize;
+  double get _lineHeight => widget.editorLineHeight * _fontSize;
 
   @override
   void initState() {
     super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: KromMotion.goToDefPulseDuration,
+    );
     _scrollController.addListener(_onScroll);
+    widget.navigationPulse?.addListener(_onNavigationPulse);
     widget.tab.codeController.configureBracketColors(
       widget.theme.bracketPairColors,
     );
@@ -59,6 +75,10 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView> {
   @override
   void didUpdateWidget(covariant IdeConceptsCodeView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.navigationPulse != widget.navigationPulse) {
+      oldWidget.navigationPulse?.removeListener(_onNavigationPulse);
+      widget.navigationPulse?.addListener(_onNavigationPulse);
+    }
     if (oldWidget.theme != widget.theme) {
       widget.tab.codeController.configureBracketColors(
         widget.theme.bracketPairColors,
@@ -71,9 +91,18 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView> {
 
   @override
   void dispose() {
+    widget.navigationPulse?.removeListener(_onNavigationPulse);
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    _pulseController.dispose();
     super.dispose();
+  }
+
+  void _onNavigationPulse() {
+    if (widget.navigationPulse?.line != null) {
+      _pulseController.forward(from: 0);
+      setState(() {});
+    }
   }
 
   void _onScroll() {
@@ -120,6 +149,7 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView> {
     final tab = widget.tab;
     final verticalPad = widget.focusOn ? 56.0 : 18.0;
     final indentDots = IndentGuideAnalyzer.analyze(tab.codeController.fullText);
+    final pulseLine = widget.navigationPulse?.line;
 
     final field = CodeTheme(
       data: buildIdeConceptsCodeTheme(theme),
@@ -127,7 +157,7 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView> {
         controller: tab.codeController,
         textStyle: IdeFonts.mono(
           fontSize: _fontSize,
-          height: _lineHeight / _fontSize,
+          height: widget.editorLineHeight,
           color: theme.syntax['plain'] ?? theme.text,
         ),
         gutterStyle: GutterStyle(
@@ -212,6 +242,24 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView> {
                   ),
                 ),
               ),
+              if (pulseLine != null)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: verticalPad + pulseLine * _lineHeight,
+                  height: _lineHeight,
+                  child: FadeTransition(
+                    opacity: Tween(begin: 1.0, end: 0.0).animate(
+                      CurvedAnimation(
+                        parent: _pulseController,
+                        curve: Curves.easeOut,
+                      ),
+                    ),
+                    child: const DecoratedBox(
+                      decoration: BoxDecoration(color: Color(0x66FFE066)),
+                    ),
+                  ),
+                ),
               if (_signatureHelp != null)
                 Positioned(
                   left: _gutterWidth + _horizontalPad,

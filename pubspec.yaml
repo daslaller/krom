@@ -44,6 +44,7 @@ dependencies:
       url: https://github.com/daslaller/Dart_LSP_Client.git
   http: ^1.2.2
   web_socket_channel: ^3.0.1
+  file_selector: ^1.1.0
 
 dev_dependencies:
   flutter_test:

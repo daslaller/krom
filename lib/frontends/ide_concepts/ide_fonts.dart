@@ -18,4 +18,7 @@ abstract final class IdeFonts {
       fontStyle: fontStyle,
     );
   }
+
+  static TextStyle ui({double? fontSize, Color? color, FontWeight? weight}) =>
+      GoogleFonts.inter(fontSize: fontSize ?? 13, color: color, fontWeight: weight);
 }

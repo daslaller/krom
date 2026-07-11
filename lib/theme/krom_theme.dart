@@ -8,8 +8,9 @@ abstract final class KromTheme {
 
   static ThemeData light() => fromIdeConcepts(IdeConceptsTheme.paperLight);
 
-  static ThemeData fromIdeConcepts(IdeConceptsTheme concepts) {
+  static ThemeData fromIdeConcepts(IdeConceptsTheme concepts, {double? uiFontSize}) {
     final isDark = concepts.brightness == Brightness.dark;
+    final uiSize = uiFontSize ?? KromTypography.uiFontSize;
     return ThemeData(
       brightness: concepts.brightness,
       scaffoldBackgroundColor: concepts.editorBg,
@@ -25,12 +26,9 @@ abstract final class KromTheme {
       cardColor: concepts.panelBg,
       dividerColor: concepts.hairline,
       textTheme: TextTheme(
-        bodyMedium: KromTypography.ui(color: concepts.text),
-        bodySmall: KromTypography.ui(
-          color: concepts.muted,
-          fontSize: KromTypography.uiFontSizeSmall,
-        ),
-        labelMedium: KromTypography.ui(color: concepts.text),
+        bodyMedium: KromTypography.ui(color: concepts.text, fontSize: uiSize),
+        bodySmall: KromTypography.ui(color: concepts.muted, fontSize: uiSize - 1),
+        labelMedium: KromTypography.ui(color: concepts.text, fontSize: uiSize),
       ),
       iconTheme: IconThemeData(color: concepts.muted, size: 18),
       scrollbarTheme: ScrollbarThemeData(

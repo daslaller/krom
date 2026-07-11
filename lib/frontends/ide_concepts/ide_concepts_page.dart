@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
@@ -31,14 +32,24 @@ class IdeConceptsPage extends StatefulWidget {
     super.key,
     required this.settings,
     required this.themeId,
+    required this.theme,
     required this.onCycleTheme,
     required this.onSetTheme,
+    required this.onSetAccentIndex,
+    required this.onSetHighContrast,
+    required this.onSetThemeSyncOs,
+    required this.onReloadThemes,
   });
 
   final SettingsService settings;
   final String themeId;
+  final IdeConceptsTheme theme;
   final Future<void> Function() onCycleTheme;
   final Future<void> Function(String themeId) onSetTheme;
+  final Future<void> Function(int index) onSetAccentIndex;
+  final Future<void> Function(bool value) onSetHighContrast;
+  final Future<void> Function(bool value) onSetThemeSyncOs;
+  final Future<void> Function() onReloadThemes;
 
   @override
   State<IdeConceptsPage> createState() => _IdeConceptsPageState();
@@ -59,7 +70,7 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
   bool _focusOn = false;
   String _initialFindQuery = '';
 
-  IdeConceptsTheme get _theme => IdeConceptsThemes.resolve(widget.themeId);
+  IdeConceptsTheme get _theme => widget.theme;
 
   @override
   void initState() {
@@ -114,6 +125,10 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
         label: 'Toggle Sidebar',
         hint: 'Ctrl+B',
       ),
+      const PaletteCommandItem(id: 'export-theme', label: 'Export Theme JSON', hint: 'appearance'),
+      const PaletteCommandItem(id: 'import-theme', label: 'Import Theme JSON', hint: 'appearance'),
+      const PaletteCommandItem(id: 'toggle-high-contrast', label: 'Toggle High Contrast', hint: 'accessibility'),
+      const PaletteCommandItem(id: 'toggle-theme-sync-os', label: 'Toggle OS Theme Sync', hint: 'appearance'),
       const PaletteCommandItem(
         id: 'cycle-theme',
         label: 'Cycle Theme',
@@ -295,43 +310,52 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
 
   void _openThemePicker() => setState(() => _showThemePicker = true);
 
+  Future<void> _exportTheme() async {
+    final location = await getSaveLocation(
+      suggestedName: '${widget.themeId}.json',
+      acceptedTypeGroups: [const XTypeGroup(label: 'JSON', extensions: ['json'])],
+    );
+    if (location == null) return;
+    await File(location.path).writeAsString(
+      IdeConceptsThemes.exportJson(_theme, id: widget.themeId),
+    );
+  }
+
+  Future<void> _importTheme() async {
+    final file = await openFile(
+      acceptedTypeGroups: [const XTypeGroup(label: 'JSON', extensions: ['json'])],
+    );
+    if (file == null) return;
+    final id = await IdeConceptsThemes.importThemeFile(file.path);
+    if (id != null) {
+      await widget.onReloadThemes();
+      await widget.onSetTheme(id);
+    }
+  }
+
   Future<void> _runPaletteCommand(String id) async {
     switch (id) {
-      case 'pick-theme':
-        _openThemePicker();
-      case 'find-in-file':
-        _openFind();
-      case 'replace-in-file':
-        _openFind(replace: true);
-      case 'rename-symbol':
-        await _promptRename();
-      case 'toggle-outline':
-        _toggleOutline();
-      case 'toggle-focus':
-        _toggleFocus();
-      case 'toggle-sidebar':
-        setState(() => _showSidebar = !_showSidebar);
-      case 'cycle-theme':
-        await widget.onCycleTheme();
-      case 'save-file':
-        await _session.saveActiveFile();
-      case 'save-all':
-        await _session.saveAllDirty();
-      case 'go-to-line':
-        await _promptGoToLine();
-      case 'format-document':
-        await _session.formatDocument();
-      case 'go-to-definition':
-        await _session.goToDefinition();
-      case 'find-references':
-        await _session.findReferences();
-      case 'toggle-autosave':
-        await widget.settings.setAutosave(!widget.settings.autosave);
-        setState(() {});
+      case 'pick-theme': _openThemePicker(); break;
+      case 'export-theme': await _exportTheme(); break;
+      case 'import-theme': await _importTheme(); break;
+      case 'toggle-high-contrast': await widget.onSetHighContrast(!widget.settings.highContrast); break;
+      case 'toggle-theme-sync-os': await widget.onSetThemeSyncOs(!widget.settings.themeSyncOs); break;
+      case 'find-in-file': _openFind(); break;
+      case 'replace-in-file': _openFind(replace: true); break;
+      case 'rename-symbol': await _promptRename(); break;
+      case 'toggle-outline': _toggleOutline(); break;
+      case 'toggle-focus': _toggleFocus(); break;
+      case 'toggle-sidebar': setState(() => _showSidebar = !_showSidebar); break;
+      case 'cycle-theme': await widget.onCycleTheme(); break;
+      case 'save-file': await _session.saveActiveFile(); break;
+      case 'save-all': await _session.saveAllDirty(); break;
+      case 'go-to-line': await _promptGoToLine(); break;
+      case 'format-document': await _session.formatDocument(); break;
+      case 'go-to-definition': await _session.goToDefinition(); break;
+      case 'find-references': await _session.findReferences(); break;
+      case 'toggle-autosave': await widget.settings.setAutosave(!widget.settings.autosave); setState(() {}); break;
       default:
-        if (id.startsWith('theme:')) {
-          await widget.onSetTheme(id.substring('theme:'.length));
-        }
+        if (id.startsWith('theme:')) await widget.onSetTheme(id.substring('theme:'.length));
     }
   }
 
@@ -578,10 +602,7 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
                                     opacity: _focusOn ? 0 : 1,
                                     child: IgnorePointer(
                                       ignoring: _focusOn,
-                                      child: IdeConceptsTabBar(
-                                        theme: theme,
-                                        controller: _session.tabController,
-                                      ),
+                                      child: IdeConceptsTabBar(theme: theme, controller: _session.tabController, uiFontSize: widget.settings.uiFontSize),
                                     ),
                                   ),
                                 ),
@@ -663,12 +684,14 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
                   ),
                 if (_showThemePicker)
                   IdeConceptsThemePicker(
-                    theme: theme,
-                    activeThemeId: widget.themeId,
-                    onSelect: (id) async {
-                      await widget.onSetTheme(id);
-                      if (mounted) setState(() => _showThemePicker = false);
-                    },
+                    theme: theme, activeThemeId: widget.themeId,
+                    accentIndex: widget.settings.accentIndex,
+                    highContrast: widget.settings.highContrast,
+                    themeSyncOs: widget.settings.themeSyncOs,
+                    onSelect: (id) async { await widget.onSetTheme(id); if (mounted) setState(() => _showThemePicker = false); },
+                    onAccentIndex: (i) async { await widget.onSetAccentIndex(i); setState(() {}); },
+                    onHighContrast: (v) async { await widget.onSetHighContrast(v); setState(() {}); },
+                    onThemeSyncOs: (v) async { await widget.onSetThemeSyncOs(v); setState(() {}); },
                     onDismiss: () => setState(() => _showThemePicker = false),
                   ),
               ],
@@ -686,11 +709,9 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
         final tab = _session.tabController.activeTab;
         if (tab == null) return _buildEmptyState(theme);
         return IdeConceptsCodeView(
-          key: ValueKey(tab.filePath),
-          theme: theme,
-          tab: tab,
-          focusOn: _focusOn,
-          lspService: _session.lspService,
+          key: ValueKey(tab.filePath), theme: theme, tab: tab, focusOn: _focusOn,
+          lspService: _session.lspService, navigationPulse: _session.navigationPulse,
+          editorFontSize: widget.settings.editorFontSize, editorLineHeight: widget.settings.editorLineHeight,
           onChanged: _session.onEditorChanged,
         );
       },

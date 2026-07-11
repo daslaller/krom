@@ -16,6 +16,7 @@ import '../services/settings_service.dart';
 import '../utils/text_position.dart';
 import 'krom_analyzer.dart';
 import 'krom_autocompleter.dart';
+import 'navigation_pulse.dart';
 import 'tab_controller.dart';
 
 /// Shared editor backend: tabs, LSP, parser, saves, and navigation.
@@ -53,6 +54,7 @@ class EditorSession extends ChangeNotifier {
   String? rootPath;
   GitStatus gitStatus = const GitStatus();
   bool useParser = true;
+  final NavigationPulse navigationPulse = NavigationPulse();
   Timer? _autosaveTimer;
 
   Future<void> initialize() async {
@@ -89,6 +91,7 @@ class EditorSession extends ChangeNotifier {
           revealLine,
           character: revealCharacter ?? 0,
         );
+        navigationPulse.pulse(revealLine);
       }
       paletteController.noteRecentFile(path);
       notifyListeners();
@@ -106,6 +109,7 @@ class EditorSession extends ChangeNotifier {
           revealLine,
           character: revealCharacter ?? 0,
         );
+        navigationPulse.pulse(revealLine);
       }
       notifyListeners();
     } catch (_) {}
@@ -287,7 +291,9 @@ class EditorSession extends ChangeNotifier {
   void goToLine(int line) {
     final tab = tabController.activeTab;
     if (tab == null) return;
-    tab.codeController.revealPosition(line.clamp(0, 1 << 20));
+    final clamped = line.clamp(0, 1 << 20);
+    tab.codeController.revealPosition(clamped);
+    navigationPulse.pulse(clamped);
     notifyListeners();
   }
 

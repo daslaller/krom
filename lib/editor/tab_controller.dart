@@ -5,8 +5,10 @@ class KromTabController extends ChangeNotifier {
   final List<TabModel> _tabs = [];
   int _activeIndex = -1;
 
+  int? _lastSavedIndex;
   List<TabModel> get tabs => _tabs;
   int get activeIndex => _activeIndex;
+  int? get lastSavedIndex => _lastSavedIndex;
   TabModel? get activeTab =>
       _activeIndex >= 0 && _activeIndex < _tabs.length
           ? _tabs[_activeIndex]
@@ -72,7 +74,11 @@ class KromTabController extends ChangeNotifier {
     if (index < 0 || index >= _tabs.length) return;
     if (_tabs[index].isDirty) {
       _tabs[index].isDirty = false;
+      _lastSavedIndex = index;
       notifyListeners();
+      Future<void>.delayed(const Duration(milliseconds: 200), () {
+        if (_lastSavedIndex == index) { _lastSavedIndex = null; notifyListeners(); }
+      });
     }
   }
 

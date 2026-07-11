@@ -1,21 +1,32 @@
 import 'package:flutter/services.dart';
+import 'package:parser_client/parser_client.dart';
 
+import '../services/parser_service.dart';
+import '../utils/text_position.dart';
 import 'krom_code_controller.dart';
 
-/// Bracket-based structural selection — Shift+Alt+→ expands, Shift+Alt+← shrinks.
-///
-/// Upgrade path: replace [_findEnclosingBrackets] with
-/// [ParserService.getNodeAtPosition] for AST-aware expansion.
+/// AST-aware structural selection with bracket fallback.
 class StructuralSelection {
-  StructuralSelection();
+  StructuralSelection({this.parserService});
 
+  final ParserService? parserService;
   final List<TextSelection> _stack = [];
 
   void clear() => _stack.clear();
 
-  void expand(KromCodeController controller) {
+  Future<void> expand(KromCodeController controller) async {
     final current = controller.selection;
     if (!current.isValid) return;
+
+    final parser = parserService;
+    if (parser != null && parser.isAvailable) {
+      final astSel = await _expandViaParser(controller, current);
+      if (astSel != null && astSel != current) {
+        _stack.add(current);
+        controller.selection = astSel;
+        return;
+      }
+    }
 
     final next = _findEnclosingBrackets(controller.fullText, current);
     if (next == null) return;
@@ -29,10 +40,44 @@ class StructuralSelection {
     controller.selection = _stack.removeLast();
   }
 
-  /// Finds the smallest bracket pair `()`, `[]`, `{}` that fully encloses
-  /// [selection]. Returns the selection inside those brackets on the first
-  /// call; if [selection] already equals that inner range, returns the range
-  /// inclusive of the brackets themselves.
+  Future<TextSelection?> _expandViaParser(
+    KromCodeController controller,
+    TextSelection selection,
+  ) async {
+    final text = controller.fullText;
+    final offset = selection.start.clamp(0, text.length);
+    final (line, column) = offsetToLineChar(text, offset);
+
+    final node = await parserService!.getNodeAtPosition(
+      controller.filePath,
+      line,
+      column,
+    );
+    if (node == null) return null;
+
+    final nodeSel = _nodeToSelection(text, node);
+    if (nodeSel == null) return null;
+
+    if (_contains(nodeSel, selection) && nodeSel != selection) {
+      return nodeSel;
+    }
+
+    return _findEnclosingBrackets(text, selection);
+  }
+
+  static bool _contains(TextSelection outer, TextSelection inner) =>
+      inner.start >= outer.start && inner.end <= outer.end;
+
+  static TextSelection? _nodeToSelection(String text, ParserNodeInfo node) {
+    final start = positionToOffset(text, node.startLine, node.startColumn);
+    final end = positionToOffset(text, node.endLine, node.endColumn);
+    if (end < start) return null;
+    return TextSelection(
+      baseOffset: start.clamp(0, text.length),
+      extentOffset: end.clamp(0, text.length),
+    );
+  }
+
   static TextSelection? _findEnclosingBrackets(
     String text,
     TextSelection selection,

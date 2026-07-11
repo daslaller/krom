@@ -1,253 +1,49 @@
 import 'package:flutter/material.dart';
-import 'package:path/path.dart' as p;
-
 import '../../../editor/tab_controller.dart';
 import '../file_label.dart';
 import '../ide_concepts_theme.dart';
 import '../ide_fonts.dart';
+import '../krom_motion.dart';
 
-/// Tab strip with Tacet-style sliding active indicator and extension coloring.
 class IdeConceptsTabBar extends StatefulWidget {
-  const IdeConceptsTabBar({
-    super.key,
-    required this.theme,
-    required this.controller,
-  });
-
-  final IdeConceptsTheme theme;
-  final KromTabController controller;
-
-  @override
-  State<IdeConceptsTabBar> createState() => _IdeConceptsTabBarState();
+  const IdeConceptsTabBar({super.key, required this.theme, required this.controller, this.uiFontSize = 13});
+  final IdeConceptsTheme theme; final KromTabController controller; final double uiFontSize;
+  @override State<IdeConceptsTabBar> createState() => _S();
 }
-
-class _IdeConceptsTabBarState extends State<IdeConceptsTabBar> {
-  final _tabKeys = <GlobalKey>[];
-  double _indicatorLeft = 0;
-  double _indicatorWidth = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.controller.addListener(_onTabsChanged);
-  }
-
-  @override
-  void dispose() {
-    widget.controller.removeListener(_onTabsChanged);
-    super.dispose();
-  }
-
-  void _onTabsChanged() {
-    _syncKeys();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _updateIndicator());
-    setState(() {});
-  }
-
-  void _syncKeys() {
-    while (_tabKeys.length < widget.controller.tabs.length) {
-      _tabKeys.add(GlobalKey());
-    }
-    while (_tabKeys.length > widget.controller.tabs.length) {
-      _tabKeys.removeLast();
-    }
-  }
-
-  void _updateIndicator() {
-    final index = widget.controller.activeIndex;
-    if (index < 0 || index >= _tabKeys.length) {
-      if (_indicatorWidth != 0) {
-        setState(() {
-          _indicatorLeft = 0;
-          _indicatorWidth = 0;
-        });
-      }
-      return;
-    }
-
-    final context = _tabKeys[index].currentContext;
-    final box = context?.findRenderObject() as RenderBox?;
-    final barBox = context?.findAncestorRenderObjectOfType<RenderBox>();
-    if (box == null || barBox == null) return;
-
-    final tabOffset = box.localToGlobal(Offset.zero, ancestor: barBox);
-    final nextLeft = tabOffset.dx;
-    final nextWidth = box.size.width;
-    if ((nextLeft - _indicatorLeft).abs() > 0.5 ||
-        (nextWidth - _indicatorWidth).abs() > 0.5) {
-      setState(() {
-        _indicatorLeft = nextLeft;
-        _indicatorWidth = nextWidth;
-      });
-    }
-  }
-
+class _S extends State<IdeConceptsTabBar> {
+  final _keys = <GlobalKey>[]; double _l = 0, _w = 0;
+  @override void initState() { super.initState(); widget.controller.addListener(_c); }
+  @override void dispose() { widget.controller.removeListener(_c); super.dispose(); }
+  void _c() { while (_keys.length < widget.controller.tabs.length) _keys.add(GlobalKey()); while (_keys.length > widget.controller.tabs.length) _keys.removeLast(); WidgetsBinding.instance.addPostFrameCallback((_) => _u()); setState(() {}); }
+  void _u() { final i = widget.controller.activeIndex; if (i < 0 || i >= _keys.length) return; final box = _keys[i].currentContext?.findRenderObject() as RenderBox?; final bar = _keys[i].currentContext?.findAncestorRenderObjectOfType<RenderBox>(); if (box == null || bar == null) return; final o = box.localToGlobal(Offset.zero, ancestor: bar); setState(() { _l = o.dx; _w = box.size.width; }); }
   @override
   Widget build(BuildContext context) {
-    final theme = widget.theme;
-    return Container(
-      height: 44,
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
-      decoration: BoxDecoration(
-        color: theme.tabBarBg,
-        border: Border(bottom: BorderSide(color: theme.hairline)),
-      ),
-      child: ListenableBuilder(
-        listenable: widget.controller,
-        builder: (context, _) {
-          _syncKeys();
-          if (widget.controller.tabs.isEmpty) return const SizedBox.shrink();
-
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _updateIndicator();
-          });
-
-          return Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: Container(height: 1, color: theme.hairline),
-              ),
-              if (_indicatorWidth > 0)
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 280),
-                  curve: Curves.easeOutCubic,
-                  left: _indicatorLeft,
-                  top: 0,
-                  width: _indicatorWidth,
-                  height: 36,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: theme.editorBg,
-                      borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(11),
-                      ),
-                    ),
-                  ),
-                ),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    for (var i = 0; i < widget.controller.tabs.length; i++)
-                      _Tab(
-                        key: _tabKeys[i],
-                        theme: theme,
-                        label: widget.controller.tabs[i].label,
-                        isActive: i == widget.controller.activeIndex,
-                        isDirty: widget.controller.tabs[i].isDirty,
-                        onTap: () => widget.controller.setActive(i),
-                        onClose: () => widget.controller.closeTab(i),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
+    final t = widget.theme;
+    return Container(height: 44, padding: const EdgeInsets.fromLTRB(10, 8, 10, 0), decoration: BoxDecoration(color: t.tabBarBg, border: Border(bottom: BorderSide(color: t.hairline))),
+      child: ListenableBuilder(listenable: widget.controller, builder: (_, __) {
+        if (widget.controller.tabs.isEmpty) return const SizedBox.shrink();
+        WidgetsBinding.instance.addPostFrameCallback((_) => _u());
+        return Stack(clipBehavior: Clip.none, children: [
+          if (_w > 0) AnimatedPositioned(duration: const Duration(milliseconds: 280), curve: Curves.easeOutCubic, left: _l, top: 0, width: _w, height: 36, child: DecoratedBox(decoration: BoxDecoration(color: t.editorBg, borderRadius: const BorderRadius.vertical(top: Radius.circular(11))))),
+          SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [for (var i = 0; i < widget.controller.tabs.length; i++) _Tab(key: _keys[i], theme: t, label: widget.controller.tabs[i].label, active: i == widget.controller.activeIndex, dirty: widget.controller.tabs[i].isDirty, flash: widget.controller.lastSavedIndex == i, fs: widget.uiFontSize, onTap: () => widget.controller.setActive(i), onClose: () => widget.controller.closeTab(i))])),
+        ]);
+      }));
   }
 }
-
 class _Tab extends StatefulWidget {
-  const _Tab({
-    super.key,
-    required this.theme,
-    required this.label,
-    required this.isActive,
-    required this.isDirty,
-    required this.onTap,
-    required this.onClose,
-  });
-
-  final IdeConceptsTheme theme;
-  final String label;
-  final bool isActive;
-  final bool isDirty;
-  final VoidCallback onTap;
-  final VoidCallback onClose;
-
-  @override
-  State<_Tab> createState() => _TabState();
+  const _Tab({super.key, required this.theme, required this.label, required this.active, required this.dirty, required this.flash, required this.fs, required this.onTap, required this.onClose});
+  final IdeConceptsTheme theme; final String label; final bool active, dirty, flash; final double fs; final VoidCallback onTap, onClose;
+  @override State<_Tab> createState() => _TS();
 }
-
-class _TabState extends State<_Tab> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = widget.theme;
-    final parts = FileLabelParts.fromFileName(widget.label);
-    final extColor = parts.extKey != null
-        ? theme.colorForExtension(parts.extKey)
-        : theme.muted;
-
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: Container(
-          height: 36,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (widget.isDirty && !_hovered)
-                Container(
-                  width: 6,
-                  height: 6,
-                  margin: const EdgeInsets.only(right: 8),
-                  decoration: BoxDecoration(
-                    color: theme.accent,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              Text.rich(
-                TextSpan(
-                  children: [
-                    TextSpan(
-                      text: parts.base,
-                      style: IdeFonts.mono(
-                        fontSize: 13,
-                        color: widget.isActive ? theme.text : theme.muted,
-                        weight: widget.isActive ? FontWeight.w500 : null,
-                      ),
-                    ),
-                    if (parts.ext.isNotEmpty)
-                      TextSpan(
-                        text: parts.ext,
-                        style: IdeFonts.mono(
-                          fontSize: 13,
-                          color: extColor,
-                          weight: widget.isActive ? FontWeight.w500 : null,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              if (_hovered)
-                GestureDetector(
-                  onTap: widget.onClose,
-                  child: Text(
-                    '×',
-                    style: IdeFonts.mono(
-                      fontSize: 15,
-                      color: theme.muted,
-                      weight: FontWeight.w300,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
+class _TS extends State<_Tab> {
+  bool _h = false;
+  @override Widget build(BuildContext context) {
+    final p = FileLabelParts.fromFileName(widget.label);
+    return MouseRegion(onEnter: (_) => setState(() => _h = true), onExit: (_) => setState(() => _h = false), child: GestureDetector(onTap: widget.onTap, child: Container(height: 36, padding: const EdgeInsets.symmetric(horizontal: 14), child: Row(mainAxisSize: MainAxisSize.min, children: [
+      if (!_h) AnimatedSwitcher(duration: KromMotion.saveFlashDuration, child: widget.flash ? Icon(Icons.check, key: const ValueKey('c'), size: 12, color: widget.theme.accent2) : widget.dirty ? Container(key: const ValueKey('d'), width: 6, height: 6, decoration: BoxDecoration(color: widget.theme.accent, shape: BoxShape.circle)) : const SizedBox(key: ValueKey('e'), width: 8)),
+      if (!_h && (widget.dirty || widget.flash)) const SizedBox(width: 6),
+      Text.rich(TextSpan(children: [TextSpan(text: p.base, style: IdeFonts.mono(fontSize: widget.fs, color: widget.active ? widget.theme.text : widget.theme.muted)), if (p.ext.isNotEmpty) TextSpan(text: p.ext, style: IdeFonts.mono(fontSize: widget.fs, color: widget.theme.colorForExtension(p.extKey)))])),
+      const SizedBox(width: 8), if (_h) GestureDetector(onTap: widget.onClose, child: Text('×', style: IdeFonts.mono(fontSize: widget.fs + 2, color: widget.theme.muted))),
+    ]))));
   }
 }

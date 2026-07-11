@@ -1,12 +1,17 @@
 import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../../command_palette/palette_item.dart';
+import 'package:lsp_client/lsp_client.dart';
 import '../../editor/find_replace.dart';
+import '../../editor/multi_cursor.dart';
 import '../../editor/structural_selection.dart';
+import '../../services/problems_collector.dart';
+import '../../services/workspace_search_service.dart';
 import '../../services/settings_service.dart';
 import '../../editor/editor_session.dart';
 import '../../utils/text_position.dart';
@@ -22,7 +27,14 @@ import 'widgets/find_replace_bar.dart';
 import 'widgets/outline_panel.dart';
 import 'widgets/sidebar.dart';
 import 'widgets/status_bar.dart';
+import 'widgets/code_actions_menu.dart';
+import 'widgets/problems_panel.dart';
+import 'widgets/split_editor.dart';
 import 'widgets/tab_bar.dart';
+import 'external_change_dialog.dart';
+import 'widgets/chat_panel.dart';
+import 'widgets/terminal_panel.dart';
+import 'widgets/workspace_search_panel.dart';
 import 'widgets/theme_picker.dart';
 import 'widgets/title_bar.dart';
 
@@ -31,14 +43,24 @@ class IdeConceptsPage extends StatefulWidget {
     super.key,
     required this.settings,
     required this.themeId,
+    required this.theme,
     required this.onCycleTheme,
     required this.onSetTheme,
+    required this.onSetAccentIndex,
+    required this.onSetHighContrast,
+    required this.onSetThemeSyncOs,
+    required this.onReloadThemes,
   });
 
   final SettingsService settings;
   final String themeId;
+  final IdeConceptsTheme theme;
   final Future<void> Function() onCycleTheme;
   final Future<void> Function(String themeId) onSetTheme;
+  final Future<void> Function(int index) onSetAccentIndex;
+  final Future<void> Function(bool value) onSetHighContrast;
+  final Future<void> Function(bool value) onSetThemeSyncOs;
+  final Future<void> Function() onReloadThemes;
 
   @override
   State<IdeConceptsPage> createState() => _IdeConceptsPageState();
@@ -47,7 +69,7 @@ class IdeConceptsPage extends StatefulWidget {
 class _IdeConceptsPageState extends State<IdeConceptsPage> {
   late final EditorSession _session;
   final _focusNode = FocusNode();
-  final _structuralSelection = StructuralSelection();
+  late final StructuralSelection _structuralSelection;
   final _findReplace = FindReplaceController();
 
   bool _showPalette = false;
@@ -56,26 +78,58 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
   bool _showFindBar = false;
   bool _findReplaceMode = false;
   bool _showThemePicker = false;
+  bool _showWorkspaceSearch = false;
+  bool _showProblems = false;
+  bool _showCodeActions = false;
+  bool _showTerminal = false;
+  bool _showChat = false;
   bool _focusOn = false;
+  SplitDirection _splitDirection = SplitDirection.none;
+  int? _secondaryTabIndex;
+  List<LspCodeAction> _codeActions = const [];
   String _initialFindQuery = '';
 
-  IdeConceptsTheme get _theme => IdeConceptsThemes.resolve(widget.themeId);
+  IdeConceptsTheme get _theme => widget.theme;
 
   @override
   void initState() {
     super.initState();
     _session = EditorSession(settings: widget.settings);
+    _structuralSelection = StructuralSelection(parserService: _session.parserService);
     _session.addListener(_onSessionChanged);
     _session.tabController.addListener(_onTabChanged);
-    _registerPaletteCommands();
-    _session.initialize();
+    _session.initialize().then((_) {
+      if (mounted) _registerPaletteCommands();
+    });
   }
 
   void _onTabChanged() => _structuralSelection.clear();
 
   void _onSessionChanged() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+      _checkExternalChanges();
+    }
   }
+
+  Future<void> _checkExternalChanges() async {
+    for (final path in _session.pendingExternalChanges.toList()) {
+      if (!mounted) return;
+      final reload = await showExternalChangeDialog(
+        context,
+        _theme,
+        _session.relativePath(path),
+      );
+      if (!mounted) return;
+      if (reload == true) {
+        await _session.reloadFileFromDisk(path);
+      } else {
+        _session.dismissExternalChange(path);
+      }
+    }
+  }
+
+  void _toggleTerminal() => setState(() => _showTerminal = !_showTerminal);
 
   void _registerPaletteCommands() {
     _session.paletteController.setCommands([
@@ -114,6 +168,10 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
         label: 'Toggle Sidebar',
         hint: 'Ctrl+B',
       ),
+      const PaletteCommandItem(id: 'export-theme', label: 'Export Theme JSON', hint: 'appearance'),
+      const PaletteCommandItem(id: 'import-theme', label: 'Import Theme JSON', hint: 'appearance'),
+      const PaletteCommandItem(id: 'toggle-high-contrast', label: 'Toggle High Contrast', hint: 'accessibility'),
+      const PaletteCommandItem(id: 'toggle-theme-sync-os', label: 'Toggle OS Theme Sync', hint: 'appearance'),
       const PaletteCommandItem(
         id: 'cycle-theme',
         label: 'Cycle Theme',
@@ -157,10 +215,38 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
         hint: 'Shift+F12',
       ),
       const PaletteCommandItem(
+        id: 'workspace-search', label: 'Workspace Search', hint: 'Ctrl+Shift+F'),
+      const PaletteCommandItem(id: 'toggle-problems', label: 'Toggle Problems', hint: 'Ctrl+Shift+M'),
+      const PaletteCommandItem(id: 'code-actions', label: 'Code Actions', hint: 'Ctrl+.'),
+      const PaletteCommandItem(id: 'split-horizontal', label: 'Split Editor Horizontal', hint: 'view'),
+      const PaletteCommandItem(id: 'split-vertical', label: 'Split Editor Vertical', hint: 'view'),
+      const PaletteCommandItem(id: 'unsplit', label: 'Close Split Editor', hint: 'view'),
+      const PaletteCommandItem(
         id: 'toggle-autosave',
         label: 'Toggle Autosave',
         hint: 'settings',
       ),
+      const PaletteCommandItem(
+        id: 'toggle-terminal',
+        label: 'Toggle Terminal',
+        hint: 'Ctrl+`',
+      ),
+      const PaletteCommandItem(
+        id: 'toggle-blame',
+        label: 'Toggle Git Blame',
+        hint: 'git',
+      ),
+      const PaletteCommandItem(
+        id: 'stage-file',
+        label: 'Git: Stage File',
+        hint: 'git',
+      ),
+      const PaletteCommandItem(
+        id: 'toggle-chat',
+        label: 'Toggle AI Chat',
+        hint: 'assistant',
+      ),
+      ..._session.extensionPaletteCommands(),
     ]);
   }
 
@@ -295,50 +381,135 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
 
   void _openThemePicker() => setState(() => _showThemePicker = true);
 
+  Future<void> _exportTheme() async {
+    final location = await getSaveLocation(
+      suggestedName: '${widget.themeId}.json',
+      acceptedTypeGroups: [const XTypeGroup(label: 'JSON', extensions: ['json'])],
+    );
+    if (location == null) return;
+    await File(location.path).writeAsString(
+      IdeConceptsThemes.exportJson(_theme, id: widget.themeId),
+    );
+  }
+
+  Future<void> _importTheme() async {
+    final file = await openFile(
+      acceptedTypeGroups: [const XTypeGroup(label: 'JSON', extensions: ['json'])],
+    );
+    if (file == null) return;
+    final id = await IdeConceptsThemes.importThemeFile(file.path);
+    if (id != null) {
+      await widget.onReloadThemes();
+      await widget.onSetTheme(id);
+    }
+  }
+
   Future<void> _runPaletteCommand(String id) async {
     switch (id) {
       case 'pick-theme':
         _openThemePicker();
+        break;
+      case 'export-theme':
+        await _exportTheme();
+        break;
+      case 'import-theme':
+        await _importTheme();
+        break;
+      case 'toggle-high-contrast':
+        await widget.onSetHighContrast(!widget.settings.highContrast);
+        break;
+      case 'toggle-theme-sync-os':
+        await widget.onSetThemeSyncOs(!widget.settings.themeSyncOs);
+        break;
       case 'find-in-file':
         _openFind();
+        break;
       case 'replace-in-file':
         _openFind(replace: true);
+        break;
       case 'rename-symbol':
         await _promptRename();
+        break;
       case 'toggle-outline':
         _toggleOutline();
+        break;
       case 'toggle-focus':
         _toggleFocus();
+        break;
       case 'toggle-sidebar':
         setState(() => _showSidebar = !_showSidebar);
+        break;
       case 'cycle-theme':
         await widget.onCycleTheme();
+        break;
       case 'save-file':
         await _session.saveActiveFile();
+        break;
       case 'save-all':
         await _session.saveAllDirty();
+        break;
       case 'go-to-line':
         await _promptGoToLine();
+        break;
       case 'format-document':
         await _session.formatDocument();
+        break;
       case 'go-to-definition':
         await _session.goToDefinition();
+        break;
       case 'find-references':
         await _session.findReferences();
+        break;
+      case 'workspace-search':
+        setState(() => _showWorkspaceSearch = !_showWorkspaceSearch);
+        break;
+      case 'toggle-problems':
+        setState(() => _showProblems = !_showProblems);
+        break;
+      case 'code-actions':
+        await _showCodeActionsMenu();
+        break;
+      case 'split-horizontal':
+        setState(() => _splitDirection = SplitDirection.horizontal);
+        break;
+      case 'split-vertical':
+        setState(() => _splitDirection = SplitDirection.vertical);
+        break;
+      case 'unsplit':
+        setState(() {
+          _splitDirection = SplitDirection.none;
+          _secondaryTabIndex = null;
+        });
+        break;
       case 'toggle-autosave':
         await widget.settings.setAutosave(!widget.settings.autosave);
         setState(() {});
+        break;
+      case 'toggle-terminal':
+        _toggleTerminal();
+        break;
+      case 'toggle-blame':
+        await _session.toggleBlame();
+        break;
+      case 'stage-file':
+        await _session.stageActiveFile();
+        break;
+      case 'toggle-chat':
+        setState(() => _showChat = !_showChat);
+        break;
       default:
         if (id.startsWith('theme:')) {
           await widget.onSetTheme(id.substring('theme:'.length));
+        } else if (id.startsWith('ext:')) {
+          await _session.runExtensionCommand(id);
         }
     }
   }
 
-  void _expandSelection() {
+  Future<void> _expandSelection() async {
     final tab = _session.tabController.activeTab;
     if (tab == null) return;
-    _structuralSelection.expand(tab.codeController);
+    await _structuralSelection.expand(tab.codeController);
   }
 
   void _shrinkSelection() {
@@ -362,7 +533,16 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
     if (target != null) _session.goToLine(target);
   }
 
-  void _closeActiveTab() {
+  
+  void _toggleWorkspaceSearch() => setState(() => _showWorkspaceSearch = !_showWorkspaceSearch);
+  void _toggleProblems() => setState(() => _showProblems = !_showProblems);
+  void _addNextOccurrence() { final t=_session.tabController.activeTab; if(t==null)return; MultiCursorController(t.codeController).addNextOccurrence(); setState((){}); }
+  void _selectAllOccurrences() { final t=_session.tabController.activeTab; if(t==null)return; MultiCursorController(t.codeController).selectAllOccurrences(); setState((){}); }
+  Future<void> _showCodeActionsMenu() async { final a=await _session.getCodeActions(); if(!mounted)return; setState((){ _codeActions=a; _showCodeActions=true; }); }
+  Future<void> _applyCodeAction(LspCodeAction action) async { setState(()=>_showCodeActions=false); if(action.edit!=null) await _session.applyWorkspaceEdit(action.edit!); }
+  void _openProblem(ProblemEntry e) => _session.openFile(e.filePath, revealLine: e.line);
+  void _openSearchMatch(WorkspaceSearchMatch m) => _session.openFile(m.filePath, revealLine: m.line);
+void _closeActiveTab() {
     _session.closeActiveTab();
   }
 
@@ -422,6 +602,12 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
           shift: true,
           alt: true,
         ): const _ShrinkSelectionIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyF, control: true, shift: true): const _WorkspaceSearchIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyM, control: true, shift: true): const _ProblemsIntent(),
+        const SingleActivator(LogicalKeyboardKey.period, control: true): const _CodeActionsIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyD, control: true): const _AddSelectionIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyL, control: true, shift: true): const _SelectAllOccurrencesIntent(),
+        const SingleActivator(LogicalKeyboardKey.backquote, control: true): const _TerminalIntent(),
       },
       child: Actions(
         actions: {
@@ -486,6 +672,16 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
                 setState(() => _showThemePicker = false);
               } else if (_showFindBar) {
                 _closeFindBar();
+              } else if (_showCodeActions) {
+                setState(() => _showCodeActions = false);
+              } else if (_showWorkspaceSearch) {
+                setState(() => _showWorkspaceSearch = false);
+              } else if (_showProblems) {
+                setState(() => _showProblems = false);
+              } else if (_showChat) {
+                setState(() => _showChat = false);
+              } else if (_showTerminal) {
+                setState(() => _showTerminal = false);
               } else if (_showOutline) {
                 setState(() => _showOutline = false);
               } else if (_focusOn) {
@@ -509,12 +705,13 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
               return null;
             },
           ),
-          _ShrinkSelectionIntent: CallbackAction<_ShrinkSelectionIntent>(
-            onInvoke: (_) {
-              _shrinkSelection();
-              return null;
-            },
-          ),
+          _ShrinkSelectionIntent: CallbackAction<_ShrinkSelectionIntent>(onInvoke: (_){_shrinkSelection();return null;}),
+          _WorkspaceSearchIntent: CallbackAction<_WorkspaceSearchIntent>(onInvoke: (_){_toggleWorkspaceSearch();return null;}),
+          _ProblemsIntent: CallbackAction<_ProblemsIntent>(onInvoke: (_){_toggleProblems();return null;}),
+          _CodeActionsIntent: CallbackAction<_CodeActionsIntent>(onInvoke: (_){_showCodeActionsMenu();return null;}),
+          _AddSelectionIntent: CallbackAction<_AddSelectionIntent>(onInvoke: (_){_addNextOccurrence();return null;}),
+          _SelectAllOccurrencesIntent: CallbackAction<_SelectAllOccurrencesIntent>(onInvoke: (_){_selectAllOccurrences();return null;}),
+          _TerminalIntent: CallbackAction<_TerminalIntent>(onInvoke: (_){_toggleTerminal();return null;}),
         },
         child: Focus(
           focusNode: _focusNode,
@@ -578,10 +775,7 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
                                     opacity: _focusOn ? 0 : 1,
                                     child: IgnorePointer(
                                       ignoring: _focusOn,
-                                      child: IdeConceptsTabBar(
-                                        theme: theme,
-                                        controller: _session.tabController,
-                                      ),
+                                      child: IdeConceptsTabBar(theme: theme, controller: _session.tabController, uiFontSize: widget.settings.uiFontSize),
                                     ),
                                   ),
                                 ),
@@ -591,6 +785,20 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
                                       Row(
                                         children: [
                                           Expanded(child: _buildEditorArea(theme)),
+                                          AnimatedContainer(
+                                            duration: KromMotion.panelDuration,
+                                            curve: KromMotion.panelCurve,
+                                            width: _showChat && !_focusOn ? 320 : 0,
+                                            child: _showChat && !_focusOn
+                                                ? IdeConceptsChatPanel(
+                                                    theme: theme,
+                                                    session: _session,
+                                                    settings: widget.settings,
+                                                    onClose: () =>
+                                                        setState(() => _showChat = false),
+                                                  )
+                                                : const SizedBox.shrink(),
+                                          ),
                                           AnimatedContainer(
                                             duration: KromMotion.panelDuration,
                                             curve: KromMotion.panelCurve,
@@ -609,6 +817,19 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
                                           ),
                                         ],
                                       ),
+                                      if (_showTerminal && !_focusOn)
+                                        BottomPanelHost(
+                                          theme: theme,
+                                          visible: _showTerminal,
+                                          title: 'Terminal',
+                                          onClose: () =>
+                                              setState(() => _showTerminal = false),
+                                          child: TerminalPanel(
+                                            theme: theme,
+                                            workingDirectory: _session.rootPath,
+                                          ),
+                                        ),
+                                      if ((_showWorkspaceSearch || _showProblems) && !_focusOn) Positioned(left:0,right:0,bottom:0,child:Column(mainAxisSize:MainAxisSize.min,children:[if(_showWorkspaceSearch)SizedBox(height:220,child:IdeConceptsWorkspaceSearchPanel(theme:theme,rootPath:_session.rootPath,onOpenMatch:_openSearchMatch,onClose:()=>setState(()=>_showWorkspaceSearch=false))),if(_showProblems)SizedBox(height:220,child:IdeConceptsProblemsPanel(theme:theme,collector:_session.problemsCollector,onOpenProblem:_openProblem,onClose:()=>setState(()=>_showProblems=false))),])),
                                       if (_showFindBar && !_focusOn)
                                         Positioned(
                                           left: 0,
@@ -648,6 +869,11 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
                         activeTab: _session.tabController.activeTab,
                         focusOn: _focusOn,
                         autosaveOn: widget.settings.autosave,
+                        errorCount: _session.problemsCollector.errorCount,
+                        warningCount: _session.problemsCollector.warningCount,
+                        blameHint: _session.showBlame
+                            ? _session.hoveredBlame?.summary
+                            : null,
                         onExitFocus: _toggleFocus,
                       ),
                     ),
@@ -661,14 +887,17 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
                     onFileSelected: _session.openFile,
                     onDismiss: () => setState(() => _showPalette = false),
                   ),
+                if (_showCodeActions) IdeConceptsCodeActionsMenu(theme: theme, actions: _codeActions, onSelect: _applyCodeAction, onDismiss: () => setState(() => _showCodeActions = false)),
                 if (_showThemePicker)
                   IdeConceptsThemePicker(
-                    theme: theme,
-                    activeThemeId: widget.themeId,
-                    onSelect: (id) async {
-                      await widget.onSetTheme(id);
-                      if (mounted) setState(() => _showThemePicker = false);
-                    },
+                    theme: theme, activeThemeId: widget.themeId,
+                    accentIndex: widget.settings.accentIndex,
+                    highContrast: widget.settings.highContrast,
+                    themeSyncOs: widget.settings.themeSyncOs,
+                    onSelect: (id) async { await widget.onSetTheme(id); if (mounted) setState(() => _showThemePicker = false); },
+                    onAccentIndex: (i) async { await widget.onSetAccentIndex(i); setState(() {}); },
+                    onHighContrast: (v) async { await widget.onSetHighContrast(v); setState(() {}); },
+                    onThemeSyncOs: (v) async { await widget.onSetThemeSyncOs(v); setState(() {}); },
                     onDismiss: () => setState(() => _showThemePicker = false),
                   ),
               ],
@@ -685,13 +914,46 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
       builder: (context, _) {
         final tab = _session.tabController.activeTab;
         if (tab == null) return _buildEmptyState(theme);
+        if (_splitDirection != SplitDirection.none) {
+          return SplitEditorView(
+            theme: theme,
+            tabController: _session.tabController,
+            direction: _splitDirection,
+            focusOn: _focusOn,
+            lspService: _session.lspService,
+            navigationPulse: _session.navigationPulse,
+            editorFontSize: widget.settings.editorFontSize,
+            editorLineHeight: widget.settings.editorLineHeight,
+            onChanged: _session.onEditorChanged,
+            onSignatureHelp: _session.getSignatureHelp,
+            diffForPath: _session.diffForPath,
+            blameForPath: _session.blameForPath,
+            showBlame: _session.showBlame,
+            onBlameHover: (_, info) => _session.setHoveredBlame(info),
+            ghostService: _session.ghostCompletionService,
+            onReferencesTap: (line, character) =>
+                _session.openReferencesAt(line, character),
+            secondaryIndex: _secondaryTabIndex,
+          );
+        }
         return IdeConceptsCodeView(
           key: ValueKey(tab.filePath),
           theme: theme,
           tab: tab,
           focusOn: _focusOn,
           lspService: _session.lspService,
+          navigationPulse: _session.navigationPulse,
+          editorFontSize: widget.settings.editorFontSize,
+          editorLineHeight: widget.settings.editorLineHeight,
           onChanged: _session.onEditorChanged,
+          onSignatureHelp: _session.getSignatureHelp,
+          diffMarkers: _session.diffForPath(tab.filePath),
+          showBlame: _session.showBlame,
+          blame: _session.blameForPath(tab.filePath),
+          onBlameHover: (_, info) => _session.setHoveredBlame(info),
+          ghostService: _session.ghostCompletionService,
+          onReferencesTap: (line, character) =>
+              _session.openReferencesAt(line, character),
         );
       },
     );
@@ -866,6 +1128,10 @@ class _FindPrevIntent extends Intent {
   const _FindPrevIntent();
 }
 
+class _TerminalIntent extends Intent {
+  const _TerminalIntent();
+}
+
 class _EscapeIntent extends Intent {
   const _EscapeIntent();
 }
@@ -886,6 +1152,9 @@ class _ExpandSelectionIntent extends Intent {
   const _ExpandSelectionIntent();
 }
 
-class _ShrinkSelectionIntent extends Intent {
-  const _ShrinkSelectionIntent();
-}
+class _ShrinkSelectionIntent extends Intent { const _ShrinkSelectionIntent(); }
+class _WorkspaceSearchIntent extends Intent { const _WorkspaceSearchIntent(); }
+class _ProblemsIntent extends Intent { const _ProblemsIntent(); }
+class _CodeActionsIntent extends Intent { const _CodeActionsIntent(); }
+class _AddSelectionIntent extends Intent { const _AddSelectionIntent(); }
+class _SelectAllOccurrencesIntent extends Intent { const _SelectAllOccurrencesIntent(); }

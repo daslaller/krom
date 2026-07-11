@@ -13,6 +13,9 @@ class IdeConceptsStatusBar extends StatelessWidget {
     required this.activeTab,
     this.focusOn = false,
     this.autosaveOn = true,
+    this.errorCount = 0,
+    this.warningCount = 0,
+    this.blameHint,
     this.onExitFocus,
   });
 
@@ -20,6 +23,9 @@ class IdeConceptsStatusBar extends StatelessWidget {
   final TabModel? activeTab;
   final bool focusOn;
   final bool autosaveOn;
+  final int errorCount;
+  final int warningCount;
+  final String? blameHint;
   final VoidCallback? onExitFocus;
 
   @override
@@ -47,7 +53,27 @@ class IdeConceptsStatusBar extends StatelessWidget {
               style: IdeFonts.mono(fontSize: 11, color: theme.statusText),
             ),
           ],
+          if (blameHint != null && blameHint!.isNotEmpty) ...[
+            _separator(theme),
+            Flexible(
+              child: Text(
+                blameHint!,
+                overflow: TextOverflow.ellipsis,
+                style: IdeFonts.mono(fontSize: 10.5, color: theme.statusText),
+              ),
+            ),
+          ],
           const Spacer(),
+          if (errorCount > 0)
+            Text(
+              '$errorCount errors',
+              style: IdeFonts.mono(fontSize: 10.5, color: theme.statusText),
+            ),
+          if (warningCount > 0)
+            Text(
+              ' $warningCount warnings',
+              style: IdeFonts.mono(fontSize: 10.5, color: theme.statusText),
+            ),
           if (focusOn && onExitFocus != null)
             GestureDetector(
               onTap: onExitFocus,

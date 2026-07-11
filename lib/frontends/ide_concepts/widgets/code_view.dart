@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
+import 'package:lsp_client/lsp_client.dart';
 
 import '../../../editor/hover_tooltip.dart';
+import '../../../editor/indent_guides.dart';
 import '../../../editor/tab_model.dart';
-import '../../../services/ghost_completion_service.dart';
 import '../../../services/lsp_service.dart';
-import '../../../utils/text_position.dart';
 import '../ide_concepts_code_theme.dart';
 import '../ide_concepts_theme.dart';
 import '../ide_fonts.dart';
-import 'code_lens_overlay.dart';
-import 'ghost_completion_overlay.dart';
+import 'editor_minimap.dart';
+import 'signature_help_popup.dart';
 
+/// Code editing surface with indent guides, minimap, and signature help.
 class IdeConceptsCodeView extends StatefulWidget {
   const IdeConceptsCodeView({
     super.key,
@@ -21,8 +21,7 @@ class IdeConceptsCodeView extends StatefulWidget {
     this.focusOn = false,
     this.onChanged,
     this.lspService,
-    this.ghostService,
-    this.onReferencesTap,
+    this.onSignatureHelp,
   });
 
   final IdeConceptsTheme theme;
@@ -30,8 +29,7 @@ class IdeConceptsCodeView extends StatefulWidget {
   final bool focusOn;
   final VoidCallback? onChanged;
   final LspService? lspService;
-  final GhostCompletionService? ghostService;
-  final void Function(int line, int character)? onReferencesTap;
+  final Future<LspSignatureHelp?> Function()? onSignatureHelp;
 
   @override
   State<IdeConceptsCodeView> createState() => _IdeConceptsCodeViewState();
@@ -42,85 +40,86 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView> {
   static const _fontSize = 13.5;
   static const _gutterWidth = 60.0;
   static const _horizontalPad = 12.0;
-  static const _verticalPad = 18.0;
+
+  final _scrollController = ScrollController();
+  double _scrollOffset = 0;
+  double _viewportExtent = 1;
+  double _maxScrollExtent = 1;
+  LspSignatureHelp? _signatureHelp;
 
   @override
   void initState() {
     super.initState();
-    widget.tab.codeController.addListener(_rebuild);
-    widget.ghostService?.addListener(_rebuild);
+    _scrollController.addListener(_onScroll);
+    widget.tab.codeController.configureBracketColors(
+      widget.theme.bracketPairColors,
+    );
   }
 
   @override
   void didUpdateWidget(covariant IdeConceptsCodeView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.tab != widget.tab) {
-      oldWidget.tab.codeController.removeListener(_rebuild);
-      widget.tab.codeController.addListener(_rebuild);
+    if (oldWidget.theme != widget.theme) {
+      widget.tab.codeController.configureBracketColors(
+        widget.theme.bracketPairColors,
+      );
     }
-    if (oldWidget.ghostService != widget.ghostService) {
-      oldWidget.ghostService?.removeListener(_rebuild);
-      widget.ghostService?.addListener(_rebuild);
+    if (oldWidget.tab.filePath != widget.tab.filePath) {
+      _signatureHelp = null;
     }
   }
 
   @override
   void dispose() {
-    widget.tab.codeController.removeListener(_rebuild);
-    widget.ghostService?.removeListener(_rebuild);
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     super.dispose();
   }
 
-  void _rebuild() {
-    if (mounted) setState(() {});
+  void _onScroll() {
+    if (!mounted) return;
+    setState(() {
+      _scrollOffset = _scrollController.offset;
+      _viewportExtent = _scrollController.position.viewportDimension;
+      _maxScrollExtent = _scrollController.position.maxScrollExtent;
+    });
   }
 
   double get _charWidth {
     final painter = TextPainter(
-      text: TextSpan(text: ' ', style: IdeFonts.mono(fontSize: _fontSize)),
+      text: TextSpan(
+        text: ' ',
+        style: IdeFonts.mono(fontSize: _fontSize),
+      ),
       textDirection: TextDirection.ltr,
     )..layout();
     return painter.width;
   }
 
-  void _handleChanged(String text) {
+  Future<void> _handleChanged(String text) async {
     widget.onChanged?.call();
-    widget.ghostService?.schedule(
-      fileText: text,
-      cursorOffset:
-          widget.tab.codeController.selection.baseOffset.clamp(0, text.length),
-      filePath: widget.tab.filePath,
-    );
+    final helpFn = widget.onSignatureHelp;
+    if (helpFn == null) return;
+    final offset = widget.tab.codeController.selection.baseOffset;
+    if (offset > 0 && text[offset - 1] == '(') {
+      final help = await helpFn();
+      if (mounted) setState(() => _signatureHelp = help);
+    } else if (_signatureHelp != null) {
+      setState(() => _signatureHelp = null);
+    }
   }
 
-  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent ||
-        event.logicalKey != LogicalKeyboardKey.tab) {
-      return KeyEventResult.ignored;
-    }
-    final ghost = widget.ghostService;
-    if (ghost?.suggestion == null) return KeyEventResult.ignored;
-    final text = widget.tab.codeController.fullText;
-    final offset =
-        widget.tab.codeController.selection.baseOffset.clamp(0, text.length);
-    acceptGhostSuggestion(
-      controller: widget.tab.codeController,
-      service: ghost!,
-      fileText: text,
-      cursorOffset: offset,
-    );
-    widget.onChanged?.call();
-    return KeyEventResult.handled;
+  void _scrollToFraction(double fraction) {
+    final max = _scrollController.position.maxScrollExtent;
+    _scrollController.jumpTo((fraction * max).clamp(0, max));
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = widget.theme;
     final tab = widget.tab;
-    final verticalPad = widget.focusOn ? 56.0 : _verticalPad;
-    final text = tab.codeController.fullText;
-    final offset = tab.codeController.selection.baseOffset.clamp(0, text.length);
-    final (line, column) = offsetToLineChar(text, offset);
+    final verticalPad = widget.focusOn ? 56.0 : 18.0;
+    final indentDots = IndentGuideAnalyzer.analyze(tab.codeController.fullText);
 
     final field = CodeTheme(
       data: buildIdeConceptsCodeTheme(theme),
@@ -155,6 +154,14 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView> {
           )
         : field;
 
+    final scrollFraction = _maxScrollExtent <= 0
+        ? 0.0
+        : (_scrollOffset / _maxScrollExtent).clamp(0.0, 1.0);
+    final viewportFraction = _maxScrollExtent <= 0
+        ? 1.0
+        : (_viewportExtent / (_viewportExtent + _maxScrollExtent))
+            .clamp(0.05, 1.0);
+
     return ColoredBox(
       color: theme.editorBg,
       child: Align(
@@ -163,37 +170,58 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView> {
           constraints: BoxConstraints(
             maxWidth: widget.focusOn ? 860 : double.infinity,
           ),
-          child: Focus(
-            onKeyEvent: _onKey,
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                editor,
-                GhostCompletionOverlay(
-                  theme: theme,
-                  suggestion: widget.ghostService?.suggestion,
-                  line: line,
-                  column: column,
-                  lineHeight: _lineHeight,
-                  charWidth: _charWidth,
-                  gutterWidth: _gutterWidth,
-                  horizontalPad: _horizontalPad,
-                  verticalPad: verticalPad,
+          child: Stack(
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: NotificationListener<ScrollNotification>(
+                      onNotification: (notification) {
+                        if (notification is ScrollUpdateNotification ||
+                            notification is ScrollMetricsNotification) {
+                          _onScroll();
+                        }
+                        return false;
+                      },
+                      child: editor,
+                    ),
+                  ),
+                  EditorMinimap(
+                    theme: theme,
+                    text: tab.codeController.fullText,
+                    highlightSpans: tab.codeController.highlightSpans,
+                    scrollFraction: scrollFraction,
+                    viewportFraction: viewportFraction,
+                    onTapFraction: _scrollToFraction,
+                  ),
+                ],
+              ),
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: CustomPaint(
+                    painter: IndentGuidePainter(
+                      dots: indentDots,
+                      colors: theme.indentGuideColors,
+                      scrollOffset: _scrollOffset,
+                      lineHeight: _lineHeight,
+                      charWidth: _charWidth,
+                      topPadding: verticalPad,
+                      leftPadding: _gutterWidth + _horizontalPad,
+                    ),
+                  ),
                 ),
-                CodeLensOverlay(
-                  theme: theme,
-                  lspService: widget.lspService,
-                  filePath: tab.filePath,
-                  fileText: text,
-                  cursorOffset: offset,
-                  lineHeight: _lineHeight,
-                  gutterWidth: _gutterWidth,
-                  horizontalPad: _horizontalPad,
-                  verticalPad: verticalPad,
-                  onReferencesTap: widget.onReferencesTap,
+              ),
+              if (_signatureHelp != null)
+                Positioned(
+                  left: _gutterWidth + _horizontalPad,
+                  top: verticalPad + 8,
+                  child: IdeConceptsSignatureHelpPopup(
+                    theme: theme,
+                    help: _signatureHelp!,
+                  ),
                 ),
-              ],
-            ),
+            ],
           ),
         ),
       ),

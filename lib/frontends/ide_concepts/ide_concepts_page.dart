@@ -197,7 +197,7 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
   }
 
   String get _workspaceName =>
-      _session.rootPath?.split(Platform.pathSeparator).last ?? 'Krom';
+      _session.rootPath?.split(Platform.filePathSeparator).last ?? 'Krom';
 
   String get _activePath {
     final tab = _session.tabController.activeTab;
@@ -397,7 +397,7 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
   Future<void> _showCodeActionsMenu() async { final a=await _session.getCodeActions(); if(!mounted)return; setState((){ _codeActions=a; _showCodeActions=true; }); }
   Future<void> _applyCodeAction(LspCodeAction action) async { setState(()=>_showCodeActions=false); if(action.edit!=null) await _session.applyWorkspaceEdit(action.edit!); }
   void _openProblem(ProblemEntry e) => _session.openFile(e.filePath, revealLine: e.line);
-  void _openSearchMatch(WorkspaceSearchMatch m) => _session.openFile(m.path, revealLine: m.line-1);
+  void _openSearchMatch(WorkspaceSearchMatch m) => _session.openFile(m.filePath, revealLine: m.line);
 void _closeActiveTab() {
     _session.closeActiveTab();
   }
@@ -523,10 +523,17 @@ void _closeActiveTab() {
             onInvoke: (_) {
               if (_showPalette) {
                 setState(() => _showPalette = false);
-              } else if (_showCodeActions) IdeConceptsCodeActionsMenu(theme: theme, actions: _codeActions, onSelect: _applyCodeAction, onDismiss: () => setState(() => _showCodeActions = false)),
-                if (_showThemePicker) {
+              } else if (_showThemePicker) {
                 setState(() => _showThemePicker = false);
-              } else if (_showFindBar) { _closeFindBar(); } else if (_showCodeActions) { setState(() => _showCodeActions = false); } else if (_showWorkspaceSearch) { setState(() => _showWorkspaceSearch = false); } else if (_showProblems) { setState(() => _showProblems = false); } else if (_showOutline) {
+              } else if (_showFindBar) {
+                _closeFindBar();
+              } else if (_showCodeActions) {
+                setState(() => _showCodeActions = false);
+              } else if (_showWorkspaceSearch) {
+                setState(() => _showWorkspaceSearch = false);
+              } else if (_showProblems) {
+                setState(() => _showProblems = false);
+              } else if (_showOutline) {
                 setState(() => _showOutline = false);
               } else if (_focusOn) {
                 setState(() => _focusOn = false);

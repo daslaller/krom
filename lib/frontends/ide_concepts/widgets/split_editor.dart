@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lsp_client/lsp_client.dart';
 import '../ide_concepts_theme.dart';
 
+import '../../../services/git_service.dart';
 import '../../../editor/navigation_pulse.dart';
 import '../../../editor/tab_controller.dart';
 import '../../../editor/tab_model.dart';
@@ -25,6 +26,10 @@ class SplitEditorView extends StatelessWidget {
     this.navigationPulse,
     this.editorFontSize = 13.5,
     this.editorLineHeight = 24 / 13.5,
+    this.diffForPath,
+    this.blameForPath,
+    this.showBlame = false,
+    this.onBlameHover,
     this.secondaryIndex,
   });
 
@@ -38,6 +43,10 @@ class SplitEditorView extends StatelessWidget {
   final NavigationPulse? navigationPulse;
   final double editorFontSize;
   final double editorLineHeight;
+  final FileDiffMarkers Function(String path)? diffForPath;
+  final Map<int, BlameLine> Function(String path)? blameForPath;
+  final bool showBlame;
+  final void Function(int line, BlameLine? info)? onBlameHover;
   final int? secondaryIndex;
 
   @override
@@ -82,6 +91,8 @@ class SplitEditorView extends StatelessWidget {
     if (tab == null) {
       return ColoredBox(color: theme.editorBg);
     }
+    final markers = diffForPath?.call(tab.filePath) ?? const FileDiffMarkers();
+    final paneBlame = blameForPath?.call(tab.filePath) ?? const {};
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -110,6 +121,10 @@ class SplitEditorView extends StatelessWidget {
             editorLineHeight: editorLineHeight,
             onChanged: onChanged,
             onSignatureHelp: onSignatureHelp,
+            diffMarkers: markers,
+            showBlame: showBlame,
+            blame: paneBlame,
+            onBlameHover: onBlameHover,
           ),
         ),
       ],

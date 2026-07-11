@@ -31,6 +31,8 @@ import 'widgets/code_actions_menu.dart';
 import 'widgets/problems_panel.dart';
 import 'widgets/split_editor.dart';
 import 'widgets/tab_bar.dart';
+import 'external_change_dialog.dart';
+import 'widgets/terminal_panel.dart';
 import 'widgets/workspace_search_panel.dart';
 import 'widgets/theme_picker.dart';
 import 'widgets/title_bar.dart';
@@ -78,6 +80,7 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
   bool _showWorkspaceSearch = false;
   bool _showProblems = false;
   bool _showCodeActions = false;
+  bool _showTerminal = false;
   bool _focusOn = false;
   SplitDirection _splitDirection = SplitDirection.none;
   int? _secondaryTabIndex;
@@ -93,15 +96,38 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
     _structuralSelection = StructuralSelection(parserService: _session.parserService);
     _session.addListener(_onSessionChanged);
     _session.tabController.addListener(_onTabChanged);
-    _registerPaletteCommands();
-    _session.initialize();
+    _session.initialize().then((_) {
+      if (mounted) _registerPaletteCommands();
+    });
   }
 
   void _onTabChanged() => _structuralSelection.clear();
 
   void _onSessionChanged() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+      _checkExternalChanges();
+    }
   }
+
+  Future<void> _checkExternalChanges() async {
+    for (final path in _session.pendingExternalChanges.toList()) {
+      if (!mounted) return;
+      final reload = await showExternalChangeDialog(
+        context,
+        _theme,
+        _session.relativePath(path),
+      );
+      if (!mounted) return;
+      if (reload == true) {
+        await _session.reloadFileFromDisk(path);
+      } else {
+        _session.dismissExternalChange(path);
+      }
+    }
+  }
+
+  void _toggleTerminal() => setState(() => _showTerminal = !_showTerminal);
 
   void _registerPaletteCommands() {
     _session.paletteController.setCommands([
@@ -198,6 +224,22 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
         label: 'Toggle Autosave',
         hint: 'settings',
       ),
+      const PaletteCommandItem(
+        id: 'toggle-terminal',
+        label: 'Toggle Terminal',
+        hint: 'Ctrl+`',
+      ),
+      const PaletteCommandItem(
+        id: 'toggle-blame',
+        label: 'Toggle Git Blame',
+        hint: 'git',
+      ),
+      const PaletteCommandItem(
+        id: 'stage-file',
+        label: 'Git: Stage File',
+        hint: 'git',
+      ),
+      ..._session.extensionPaletteCommands(),
     ]);
   }
 
@@ -436,8 +478,21 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
         await widget.settings.setAutosave(!widget.settings.autosave);
         setState(() {});
         break;
+      case 'toggle-terminal':
+        _toggleTerminal();
+        break;
+      case 'toggle-blame':
+        await _session.toggleBlame();
+        break;
+      case 'stage-file':
+        await _session.stageActiveFile();
+        break;
       default:
-        if (id.startsWith('theme:')) await widget.onSetTheme(id.substring('theme:'.length));
+        if (id.startsWith('theme:')) {
+          await widget.onSetTheme(id.substring('theme:'.length));
+        } else if (id.startsWith('ext:')) {
+          await _session.runExtensionCommand(id);
+        }
     }
   }
 
@@ -542,6 +597,7 @@ void _closeActiveTab() {
         const SingleActivator(LogicalKeyboardKey.period, control: true): const _CodeActionsIntent(),
         const SingleActivator(LogicalKeyboardKey.keyD, control: true): const _AddSelectionIntent(),
         const SingleActivator(LogicalKeyboardKey.keyL, control: true, shift: true): const _SelectAllOccurrencesIntent(),
+        const SingleActivator(LogicalKeyboardKey.backquote, control: true): const _TerminalIntent(),
       },
       child: Actions(
         actions: {
@@ -612,6 +668,8 @@ void _closeActiveTab() {
                 setState(() => _showWorkspaceSearch = false);
               } else if (_showProblems) {
                 setState(() => _showProblems = false);
+              } else if (_showTerminal) {
+                setState(() => _showTerminal = false);
               } else if (_showOutline) {
                 setState(() => _showOutline = false);
               } else if (_focusOn) {
@@ -641,6 +699,7 @@ void _closeActiveTab() {
           _CodeActionsIntent: CallbackAction<_CodeActionsIntent>(onInvoke: (_){_showCodeActionsMenu();return null;}),
           _AddSelectionIntent: CallbackAction<_AddSelectionIntent>(onInvoke: (_){_addNextOccurrence();return null;}),
           _SelectAllOccurrencesIntent: CallbackAction<_SelectAllOccurrencesIntent>(onInvoke: (_){_selectAllOccurrences();return null;}),
+          _TerminalIntent: CallbackAction<_TerminalIntent>(onInvoke: (_){_toggleTerminal();return null;}),
         },
         child: Focus(
           focusNode: _focusNode,
@@ -732,6 +791,18 @@ void _closeActiveTab() {
                                           ),
                                         ],
                                       ),
+                                      if (_showTerminal && !_focusOn)
+                                        BottomPanelHost(
+                                          theme: theme,
+                                          visible: _showTerminal,
+                                          title: 'Terminal',
+                                          onClose: () =>
+                                              setState(() => _showTerminal = false),
+                                          child: TerminalPanel(
+                                            theme: theme,
+                                            workingDirectory: _session.rootPath,
+                                          ),
+                                        ),
                                       if ((_showWorkspaceSearch || _showProblems) && !_focusOn) Positioned(left:0,right:0,bottom:0,child:Column(mainAxisSize:MainAxisSize.min,children:[if(_showWorkspaceSearch)SizedBox(height:220,child:IdeConceptsWorkspaceSearchPanel(theme:theme,rootPath:_session.rootPath,onOpenMatch:_openSearchMatch,onClose:()=>setState(()=>_showWorkspaceSearch=false))),if(_showProblems)SizedBox(height:220,child:IdeConceptsProblemsPanel(theme:theme,collector:_session.problemsCollector,onOpenProblem:_openProblem,onClose:()=>setState(()=>_showProblems=false))),])),
                                       if (_showFindBar && !_focusOn)
                                         Positioned(
@@ -774,6 +845,9 @@ void _closeActiveTab() {
                         autosaveOn: widget.settings.autosave,
                         errorCount: _session.problemsCollector.errorCount,
                         warningCount: _session.problemsCollector.warningCount,
+                        blameHint: _session.showBlame
+                            ? _session.hoveredBlame?.summary
+                            : null,
                         onExitFocus: _toggleFocus,
                       ),
                     ),
@@ -826,6 +900,10 @@ void _closeActiveTab() {
             editorLineHeight: widget.settings.editorLineHeight,
             onChanged: _session.onEditorChanged,
             onSignatureHelp: _session.getSignatureHelp,
+            diffForPath: _session.diffForPath,
+            blameForPath: _session.blameForPath,
+            showBlame: _session.showBlame,
+            onBlameHover: (_, info) => _session.setHoveredBlame(info),
             secondaryIndex: _secondaryTabIndex,
           );
         }
@@ -840,6 +918,10 @@ void _closeActiveTab() {
           editorLineHeight: widget.settings.editorLineHeight,
           onChanged: _session.onEditorChanged,
           onSignatureHelp: _session.getSignatureHelp,
+          diffMarkers: _session.diffForPath(tab.filePath),
+          showBlame: _session.showBlame,
+          blame: _session.blameForPath(tab.filePath),
+          onBlameHover: (_, info) => _session.setHoveredBlame(info),
         );
       },
     );
@@ -1012,6 +1094,10 @@ class _FindNextIntent extends Intent {
 
 class _FindPrevIntent extends Intent {
   const _FindPrevIntent();
+}
+
+class _TerminalIntent extends Intent {
+  const _TerminalIntent();
 }
 
 class _EscapeIntent extends Intent {

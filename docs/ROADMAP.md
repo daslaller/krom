@@ -128,7 +128,7 @@ IdeConceptsThemes registry
 
 ---
 
-## Phase 4 — Workspace Intelligence ⬜
+## Phase 4 — Workspace Intelligence ✅
 
 - Git: inline diff gutters, stage hunks, blame toggle
 - Terminal panel (`Ctrl+`` `)
@@ -154,7 +154,7 @@ Phase 0  ✅  Shell, LSP, outline, structural selection, themes
 Phase 1  ✅  Find/replace, rename, LSP outline, theme picker, motion tokens
 Phase 2  ✅  Workspace search, problems, code actions, minimap, splits
 Phase 3  ✅  User themes, semantic tokens, motion polish pass
-Phase 4      Terminal, git diff, file watcher
+Phase 4  ✅  Terminal, git diff, file watcher
 Phase 5      AI inline assist, chat, code lens, live share skeleton
 ```
 

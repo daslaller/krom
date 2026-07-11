@@ -5,14 +5,17 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../../command_palette/palette_item.dart';
+import '../../editor/structural_selection.dart';
 import '../../services/settings_service.dart';
 import '../../editor/editor_session.dart';
 import '../../utils/text_position.dart';
 import 'go_to_line_dialog.dart';
 import 'ide_concepts_theme.dart';
+import 'ide_concepts_themes.dart';
 import 'ide_fonts.dart';
 import 'widgets/code_view.dart';
 import 'widgets/command_palette.dart';
+import 'widgets/outline_panel.dart';
 import 'widgets/sidebar.dart';
 import 'widgets/status_bar.dart';
 import 'widgets/tab_bar.dart';
@@ -22,13 +25,15 @@ class IdeConceptsPage extends StatefulWidget {
   const IdeConceptsPage({
     super.key,
     required this.settings,
-    required this.isDark,
-    required this.onToggleTheme,
+    required this.themeId,
+    required this.onCycleTheme,
+    required this.onSetTheme,
   });
 
   final SettingsService settings;
-  final bool isDark;
-  final Future<void> Function() onToggleTheme;
+  final String themeId;
+  final Future<void> Function() onCycleTheme;
+  final Future<void> Function(String themeId) onSetTheme;
 
   @override
   State<IdeConceptsPage> createState() => _IdeConceptsPageState();
@@ -37,23 +42,26 @@ class IdeConceptsPage extends StatefulWidget {
 class _IdeConceptsPageState extends State<IdeConceptsPage> {
   late final EditorSession _session;
   final _focusNode = FocusNode();
+  final _structuralSelection = StructuralSelection();
 
   bool _showPalette = false;
   bool _showSidebar = true;
+  bool _showOutline = false;
   bool _focusOn = false;
 
-  IdeConceptsTheme get _theme => widget.isDark
-      ? IdeConceptsTheme.midnightIndigo
-      : IdeConceptsTheme.paperLight;
+  IdeConceptsTheme get _theme => IdeConceptsThemes.resolve(widget.themeId);
 
   @override
   void initState() {
     super.initState();
     _session = EditorSession(settings: widget.settings);
     _session.addListener(_onSessionChanged);
+    _session.tabController.addListener(_onTabChanged);
     _registerPaletteCommands();
     _session.initialize();
   }
+
+  void _onTabChanged() => _structuralSelection.clear();
 
   void _onSessionChanged() {
     if (mounted) setState(() {});
@@ -61,6 +69,11 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
 
   void _registerPaletteCommands() {
     _session.paletteController.setCommands([
+      const PaletteCommandItem(
+        id: 'toggle-outline',
+        label: 'Toggle Outline',
+        hint: 'Ctrl+Shift+O',
+      ),
       const PaletteCommandItem(
         id: 'toggle-focus',
         label: 'Toggle Focus Mode',
@@ -72,9 +85,16 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
         hint: 'Ctrl+B',
       ),
       const PaletteCommandItem(
-        id: 'toggle-theme',
-        label: 'Switch Theme',
+        id: 'cycle-theme',
+        label: 'Cycle Theme',
         hint: 'theme',
+      ),
+      ...IdeConceptsThemes.all.map(
+        (entry) => PaletteCommandItem(
+          id: 'theme:${entry.id}',
+          label: 'Theme: ${entry.theme.name}',
+          hint: 'appearance',
+        ),
       ),
       const PaletteCommandItem(
         id: 'save-file',
@@ -116,6 +136,7 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
 
   @override
   void dispose() {
+    _session.tabController.removeListener(_onTabChanged);
     _session.removeListener(_onSessionChanged);
     _session.dispose();
     _focusNode.dispose();
@@ -144,14 +165,18 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
 
   void _toggleFocus() => setState(() => _focusOn = !_focusOn);
 
+  void _toggleOutline() => setState(() => _showOutline = !_showOutline);
+
   Future<void> _runPaletteCommand(String id) async {
     switch (id) {
+      case 'toggle-outline':
+        _toggleOutline();
       case 'toggle-focus':
         _toggleFocus();
       case 'toggle-sidebar':
         setState(() => _showSidebar = !_showSidebar);
-      case 'toggle-theme':
-        await widget.onToggleTheme();
+      case 'cycle-theme':
+        await widget.onCycleTheme();
       case 'save-file':
         await _session.saveActiveFile();
       case 'save-all':
@@ -167,7 +192,23 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
       case 'toggle-autosave':
         await widget.settings.setAutosave(!widget.settings.autosave);
         setState(() {});
+      default:
+        if (id.startsWith('theme:')) {
+          await widget.onSetTheme(id.substring('theme:'.length));
+        }
     }
+  }
+
+  void _expandSelection() {
+    final tab = _session.tabController.activeTab;
+    if (tab == null) return;
+    _structuralSelection.expand(tab.codeController);
+  }
+
+  void _shrinkSelection() {
+    final tab = _session.tabController.activeTab;
+    if (tab == null) return;
+    _structuralSelection.shrink(tab.codeController);
   }
 
   Future<void> _promptGoToLine() async {
@@ -200,6 +241,8 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
             const _PaletteIntent(),
         const SingleActivator(LogicalKeyboardKey.keyB, control: true):
             const _SidebarIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyO, control: true, shift: true):
+            const _OutlineIntent(),
         const SingleActivator(LogicalKeyboardKey.keyS, control: true):
             const _SaveIntent(),
         const SingleActivator(
@@ -225,6 +268,16 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
             const _FindReferencesIntent(),
         const SingleActivator(LogicalKeyboardKey.keyF, alt: true, shift: true):
             const _FormatIntent(),
+        const SingleActivator(
+          LogicalKeyboardKey.arrowRight,
+          shift: true,
+          alt: true,
+        ): const _ExpandSelectionIntent(),
+        const SingleActivator(
+          LogicalKeyboardKey.arrowLeft,
+          shift: true,
+          alt: true,
+        ): const _ShrinkSelectionIntent(),
       },
       child: Actions(
         actions: {
@@ -233,6 +286,9 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
           ),
           _SidebarIntent: CallbackAction<_SidebarIntent>(
             onInvoke: (_) => setState(() => _showSidebar = !_showSidebar),
+          ),
+          _OutlineIntent: CallbackAction<_OutlineIntent>(
+            onInvoke: (_) => _toggleOutline(),
           ),
           _SaveIntent: CallbackAction<_SaveIntent>(
             onInvoke: (_) => _session.saveActiveFile(),
@@ -256,6 +312,8 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
             onInvoke: (_) {
               if (_showPalette) {
                 setState(() => _showPalette = false);
+              } else if (_showOutline) {
+                setState(() => _showOutline = false);
               } else if (_focusOn) {
                 setState(() => _focusOn = false);
               }
@@ -270,6 +328,18 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
           ),
           _FormatIntent: CallbackAction<_FormatIntent>(
             onInvoke: (_) => _session.formatDocument(),
+          ),
+          _ExpandSelectionIntent: CallbackAction<_ExpandSelectionIntent>(
+            onInvoke: (_) {
+              _expandSelection();
+              return null;
+            },
+          ),
+          _ShrinkSelectionIntent: CallbackAction<_ShrinkSelectionIntent>(
+            onInvoke: (_) {
+              _shrinkSelection();
+              return null;
+            },
           ),
         },
         child: Focus(
@@ -294,11 +364,10 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
                             theme: theme,
                             workspaceName: _workspaceName,
                             activePath: _activePath,
-                            isDark: widget.isDark,
                             focusOn: _focusOn,
                             onToggleFocus: _toggleFocus,
                             onOpenPalette: _togglePalette,
-                            onToggleTheme: () => widget.onToggleTheme(),
+                            onToggleTheme: () => widget.onCycleTheme(),
                           ),
                         ),
                       ),
@@ -342,7 +411,28 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
                                     ),
                                   ),
                                 ),
-                                Expanded(child: _buildEditorArea(theme)),
+                                Expanded(
+                                  child: Row(
+                                    children: [
+                                      Expanded(child: _buildEditorArea(theme)),
+                                      AnimatedContainer(
+                                        duration:
+                                            const Duration(milliseconds: 320),
+                                        curve: Curves.easeOutCubic,
+                                        width: _showOutline && !_focusOn
+                                            ? 240
+                                            : 0,
+                                        child: _showOutline && !_focusOn
+                                            ? IdeConceptsOutlinePanel(
+                                                theme: theme,
+                                                tabController:
+                                                    _session.tabController,
+                                              )
+                                            : const SizedBox.shrink(),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -430,6 +520,13 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
               const SizedBox(height: 8),
               _EmptyStateAction(
                 theme: theme,
+                label: 'Toggle Outline',
+                shortcut: 'Ctrl+Shift+O',
+                onTap: _toggleOutline,
+              ),
+              const SizedBox(height: 8),
+              _EmptyStateAction(
+                theme: theme,
                 label: 'Focus Mode',
                 shortcut: 'palette',
                 onTap: _toggleFocus,
@@ -481,10 +578,14 @@ class _EmptyStateActionState extends State<_EmptyStateAction> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                widget.label,
-                style: IdeFonts.mono(color: theme.muted, fontSize: 14),
+              Flexible(
+                child: Text(
+                  widget.label,
+                  overflow: TextOverflow.ellipsis,
+                  style: IdeFonts.mono(color: theme.muted, fontSize: 14),
+                ),
               ),
+              const SizedBox(width: 8),
               Text(
                 widget.shortcut,
                 style: IdeFonts.mono(color: theme.iconDim, fontSize: 12),
@@ -503,6 +604,10 @@ class _PaletteIntent extends Intent {
 
 class _SidebarIntent extends Intent {
   const _SidebarIntent();
+}
+
+class _OutlineIntent extends Intent {
+  const _OutlineIntent();
 }
 
 class _SaveIntent extends Intent {
@@ -543,4 +648,12 @@ class _FindReferencesIntent extends Intent {
 
 class _FormatIntent extends Intent {
   const _FormatIntent();
+}
+
+class _ExpandSelectionIntent extends Intent {
+  const _ExpandSelectionIntent();
+}
+
+class _ShrinkSelectionIntent extends Intent {
+  const _ShrinkSelectionIntent();
 }

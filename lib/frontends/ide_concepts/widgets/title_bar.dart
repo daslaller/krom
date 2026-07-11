@@ -11,7 +11,6 @@ class IdeConceptsTitleBar extends StatelessWidget {
     required this.theme,
     required this.workspaceName,
     required this.activePath,
-    required this.isDark,
     required this.focusOn,
     required this.onToggleFocus,
     required this.onOpenPalette,
@@ -21,7 +20,6 @@ class IdeConceptsTitleBar extends StatelessWidget {
   final IdeConceptsTheme theme;
   final String workspaceName;
   final String activePath;
-  final bool isDark;
   final bool focusOn;
   final VoidCallback onToggleFocus;
   final VoidCallback onOpenPalette;
@@ -78,10 +76,12 @@ class IdeConceptsTitleBar extends StatelessWidget {
                   onTap: onOpenPalette,
                 ),
                 const SizedBox(width: 8),
-                _ThemePill(
-                  theme: theme,
-                  isDark: isDark,
-                  onTap: onToggleTheme,
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 108),
+                  child: _ThemePill(
+                    theme: theme,
+                    onTap: onToggleTheme,
+                  ),
                 ),
               ],
             ),
@@ -213,12 +213,10 @@ class _ChromeButtonState extends State<_ChromeButton> {
 class _ThemePill extends StatefulWidget {
   const _ThemePill({
     required this.theme,
-    required this.isDark,
     required this.onTap,
   });
 
   final IdeConceptsTheme theme;
-  final bool isDark;
   final VoidCallback onTap;
 
   @override
@@ -258,11 +256,14 @@ class _ThemePillState extends State<_ThemePill> {
                   ),
                 ),
                 const SizedBox(width: 6),
-                Text(
-                  widget.isDark ? 'Dark' : 'Light',
-                  style: IdeFonts.mono(
-                    fontSize: 11,
-                    color: widget.theme.muted,
+                Flexible(
+                  child: Text(
+                    widget.theme.name,
+                    overflow: TextOverflow.ellipsis,
+                    style: IdeFonts.mono(
+                      fontSize: 11,
+                      color: widget.theme.muted,
+                    ),
                   ),
                 ),
               ],

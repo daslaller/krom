@@ -17,6 +17,7 @@ import '../utils/text_position.dart';
 import 'code_view.dart';
 import 'krom_analyzer.dart';
 import 'krom_autocompleter.dart';
+import 'structural_selection.dart';
 import 'tab_bar.dart';
 import 'tab_controller.dart';
 
@@ -41,7 +42,7 @@ class _EditorPageState extends State<EditorPage> {
   final Map<String, KromAnalyzer> _analyzers = {};
   final Map<String, KromAutocompleter> _autocompleters = {};
   // Structural selection stack — Shift+Alt+→ pushes, Shift+Alt+← pops.
-  final List<TextSelection> _selectionStack = [];
+  final _structuralSelection = StructuralSelection();
 
   String? _rootPath;
   bool _showPalette = false;
@@ -76,7 +77,7 @@ class _EditorPageState extends State<EditorPage> {
     super.dispose();
   }
 
-  void _onTabChanged() => _selectionStack.clear();
+  void _onTabChanged() => _structuralSelection.clear();
 
   Future<void> _openFolder(String path) async {
     _rootPath = path;
@@ -279,81 +280,13 @@ class _EditorPageState extends State<EditorPage> {
   void _expandSelection() {
     final tab = _tabController.activeTab;
     if (tab == null) return;
-    final controller = tab.codeController;
-    final text = controller.fullText;
-    final current = controller.selection;
-    if (!current.isValid) return;
-
-    final next = _findEnclosingBrackets(text, current);
-    if (next == null) return;
-
-    _selectionStack.add(current);
-    controller.selection = next;
+    _structuralSelection.expand(tab.codeController);
   }
 
   void _shrinkSelection() {
-    if (_selectionStack.isEmpty) return;
     final tab = _tabController.activeTab;
     if (tab == null) return;
-    tab.codeController.selection = _selectionStack.removeLast();
-  }
-
-  /// Finds the smallest bracket pair `()`, `[]`, `{}` that fully encloses
-  /// [selection]. Returns the selection inside those brackets on the first
-  /// call; if [selection] already equals that inner range, returns the range
-  /// inclusive of the brackets themselves.
-  static TextSelection? _findEnclosingBrackets(
-    String text,
-    TextSelection selection,
-  ) {
-    const opens = '({[';
-    const closes = ')}]';
-
-    final start = selection.start;
-    final end = selection.end;
-
-    // Walk backwards from start to find the nearest unmatched opening bracket.
-    var depth = 0;
-    for (var i = start - 1; i >= 0; i--) {
-      final c = text[i];
-      final closeIdx = closes.indexOf(c);
-      if (closeIdx >= 0) {
-        depth++;
-        continue;
-      }
-      final openIdx = opens.indexOf(c);
-      if (openIdx < 0) continue;
-
-      if (depth > 0) {
-        depth--;
-        continue;
-      }
-
-      // Found an unmatched opening bracket at i. Scan forward for its match.
-      final matchClose = closes[openIdx];
-      var inner = 0;
-      for (var j = i + 1; j < text.length; j++) {
-        if (text[j] == text[i]) {
-          inner++;
-        } else if (text[j] == matchClose) {
-          if (inner > 0) {
-            inner--;
-            continue;
-          }
-          // j is the closing bracket. Offer inner range first, then outer.
-          final innerSel = TextSelection(baseOffset: i + 1, extentOffset: j);
-          if (selection.start == i + 1 && selection.end == j) {
-            // Already selecting inside — expand to include brackets.
-            return TextSelection(baseOffset: i, extentOffset: j + 1);
-          }
-          // Does the closing bracket come after (or at) the current end?
-          if (j >= end) return innerSel;
-          break;
-        }
-      }
-      break;
-    }
-    return null;
+    _structuralSelection.shrink(tab.codeController);
   }
 
   // ---------------------------------------------------------------------------

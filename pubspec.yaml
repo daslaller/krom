@@ -40,8 +40,8 @@ dependencies:
       url: https://github.com/daslaller/krom-parser.git
       path: clients/dart
   lsp_client:
-    git:
-      url: https://github.com/daslaller/Dart_LSP_Client.git
+    path: ../Dart_LSP_Client
+  file_selector: ^1.1.0
 
 dev_dependencies:
   flutter_test:

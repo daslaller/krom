@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
 
 import '../services/lsp_service.dart';
+import '../services/problems_collector.dart';
 
 /// Bridges LSP diagnostics into flutter_code_editor's [AbstractAnalyzer].
 ///
@@ -14,12 +15,16 @@ class KromAnalyzer extends AbstractAnalyzer {
     required LspService lspService,
     required String filePath,
     required void Function() onNewDiagnostics,
-  }) {
+    ProblemsCollector? problemsCollector,
+  }) : _problemsCollector = problemsCollector {
     _sub = lspService.diagnosticsFor(filePath).listen((issues) {
       _issues = issues;
+      _problemsCollector?.update(filePath, issues);
       onNewDiagnostics();
     });
   }
+
+  final ProblemsCollector? _problemsCollector;
 
   List<Issue> _issues = const [];
   StreamSubscription<List<Issue>>? _sub;

@@ -10,6 +10,7 @@ import '../services/file_service.dart';
 import '../services/git_service.dart';
 import '../services/lsp_service.dart';
 import '../services/parser_service.dart';
+import '../services/problems_collector.dart';
 import '../services/settings_service.dart';
 import '../utils/text_position.dart';
 import 'krom_analyzer.dart';
@@ -39,6 +40,7 @@ class EditorSession extends ChangeNotifier {
   final GitService gitService;
   late final LspService lspService;
   late final ParserService parserService;
+  final ProblemsCollector problemsCollector = ProblemsCollector();
 
   final Map<String, KromAnalyzer> _analyzers = {};
   final Map<String, KromAutocompleter> _autocompleters = {};
@@ -113,6 +115,7 @@ class EditorSession extends ChangeNotifier {
     final analyzer = KromAnalyzer(
       lspService: lspService,
       filePath: path,
+      problemsCollector: problemsCollector,
       onNewDiagnostics: () => tab.codeController.analyzeCode(),
     );
     _analyzers[path] = analyzer;
@@ -147,6 +150,7 @@ class EditorSession extends ChangeNotifier {
   void _closeLsp(String path) {
     _analyzers.remove(path)?.dispose();
     _autocompleters.remove(path)?.dispose();
+    problemsCollector.remove(path);
     final languageId = LspService.languageIdFromPath(path);
     if (languageId != null) {
       lspService.closeDocument(path, languageId);
@@ -343,7 +347,8 @@ class EditorSession extends ChangeNotifier {
     );
     return prepared?.placeholder;
   }
-
+  Future<List<LspCodeAction>> getCodeActions() async { final tab=tabController.activeTab; if(tab==null)return const[]; final sel=tab.codeController.selection; if(!sel.isValid)return const[]; final text=tab.codeController.fullText; final (a,b)=offsetToLineChar(text,sel.start); final (c,d)=offsetToLineChar(text,sel.end); return lspService.getCodeActions(tab.filePath,a,b,c,d); }
+  Future<LspSignatureHelp?> getSignatureHelp() async { final tab=tabController.activeTab; if(tab==null)return null; final off=tab.codeController.selection.baseOffset; if(off<0)return null; final text=tab.codeController.fullText; final (l,ch)=offsetToLineChar(text,off); return lspService.getSignatureHelp(tab.filePath,l,ch); }
   @override
   void dispose() {
     _autosaveTimer?.cancel();

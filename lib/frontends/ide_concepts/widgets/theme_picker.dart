@@ -7,19 +7,31 @@ import '../ide_concepts_themes.dart';
 import '../ide_fonts.dart';
 import '../krom_motion.dart';
 
-/// Visual theme picker with live swatch previews.
+/// Visual theme picker with accent swatches and accessibility toggles.
 class IdeConceptsThemePicker extends StatefulWidget {
   const IdeConceptsThemePicker({
     super.key,
     required this.theme,
     required this.activeThemeId,
+    required this.accentIndex,
+    required this.highContrast,
+    required this.themeSyncOs,
     required this.onSelect,
+    required this.onAccentIndex,
+    required this.onHighContrast,
+    required this.onThemeSyncOs,
     required this.onDismiss,
   });
 
   final IdeConceptsTheme theme;
   final String activeThemeId;
+  final int accentIndex;
+  final bool highContrast;
+  final bool themeSyncOs;
   final void Function(String themeId) onSelect;
+  final void Function(int index) onAccentIndex;
+  final void Function(bool value) onHighContrast;
+  final void Function(bool value) onThemeSyncOs;
   final VoidCallback onDismiss;
 
   @override
@@ -65,7 +77,8 @@ class _IdeConceptsThemePickerState extends State<IdeConceptsThemePicker>
                     borderRadius: BorderRadius.circular(12),
                     elevation: 16,
                     child: Container(
-                      width: 520,
+                      width: 560,
+                      constraints: const BoxConstraints(maxHeight: 520),
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(12),
@@ -83,21 +96,60 @@ class _IdeConceptsThemePickerState extends State<IdeConceptsThemePicker>
                               weight: FontWeight.w600,
                             ),
                           ),
-                          const SizedBox(height: 16),
-                          Wrap(
-                            spacing: 12,
-                            runSpacing: 12,
+                          const SizedBox(height: 12),
+                          _ToggleRow(
+                            theme: theme,
+                            label: 'High contrast',
+                            value: widget.highContrast,
+                            onChanged: widget.onHighContrast,
+                          ),
+                          _ToggleRow(
+                            theme: theme,
+                            label: 'Sync with OS',
+                            value: widget.themeSyncOs,
+                            onChanged: widget.onThemeSyncOs,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Accent',
+                            style: IdeFonts.mono(
+                              color: theme.muted,
+                              fontSize: 11,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
                             children: [
-                              for (final entry in IdeConceptsThemes.all)
-                                _ThemeCard(
-                                  entry: entry,
-                                  active: entry.id ==
-                                      IdeConceptsThemes.normalizeId(
-                                        widget.activeThemeId,
-                                      ),
-                                  onTap: () => widget.onSelect(entry.id),
+                              for (var i = 0; i < 4; i++)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 8),
+                                  child: _AccentSwatch(
+                                    color: theme.resolvedAccentVariants[i],
+                                    selected: widget.accentIndex == i,
+                                    onTap: () => widget.onAccentIndex(i),
+                                  ),
                                 ),
                             ],
+                          ),
+                          const SizedBox(height: 12),
+                          Flexible(
+                            child: SingleChildScrollView(
+                              child: Wrap(
+                                spacing: 12,
+                                runSpacing: 12,
+                                children: [
+                                  for (final entry in IdeConceptsThemes.all)
+                                    _ThemeCard(
+                                      entry: entry,
+                                      active: entry.id ==
+                                          IdeConceptsThemes.normalizeId(
+                                            widget.activeThemeId,
+                                          ),
+                                      onTap: () => widget.onSelect(entry.id),
+                                    ),
+                                ],
+                              ),
+                            ),
                           ),
                           const SizedBox(height: 12),
                           Align(
@@ -117,6 +169,70 @@ class _IdeConceptsThemePickerState extends State<IdeConceptsThemePicker>
                 ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ToggleRow extends StatelessWidget {
+  const _ToggleRow({
+    required this.theme,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final IdeConceptsTheme theme;
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: IdeFonts.mono(color: theme.text, fontSize: 12),
+          ),
+        ),
+        Switch(
+          value: value,
+          onChanged: onChanged,
+          activeThumbColor: theme.accent,
+        ),
+      ],
+    );
+  }
+}
+
+class _AccentSwatch extends StatelessWidget {
+  const _AccentSwatch({
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final Color color;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: selected ? Colors.white : Colors.black26,
+            width: selected ? 2 : 1,
           ),
         ),
       ),
@@ -196,7 +312,6 @@ class _ThemeCardState extends State<_ThemeCard> {
 
 class _Swatch extends StatelessWidget {
   const _Swatch({required this.color});
-
   final Color color;
 
   @override

@@ -31,6 +31,8 @@ class IdeConceptsTheme {
     required this.fileDots,
     required this.syntax,
     required this.syntaxItalic,
+    required this.indentGuideColors,
+    required this.bracketPairColors,
   });
 
   final String name;
@@ -70,7 +72,13 @@ class IdeConceptsTheme {
 
   /// Token kinds rendered in italic (e.g. comments).
   final Set<String> syntaxItalic;
-
+  final List<Color> indentGuideColors;
+  final List<Color> bracketPairColors;
+  static const _gM=[Color(0xFF8B93FF),Color(0xFF6FD3A3),Color(0xFFFFB066),Color(0xFFFF8FC7),Color(0xFF6EA8FF),Color(0xFFFFE066),Color(0xFFF7768E),Color(0xFF7DCFFF)];
+  static const _gP=[Color(0xFF5C7A63),Color(0xFF8A6A4A),Color(0xFFB3673A),Color(0xFFC94F8F),Color(0xFF3B6FD6),Color(0xFFB89B1F),Color(0xFFC9772F),Color(0xFF55763E)];
+  static const _gT=[Color(0xFF7AA2F7),Color(0xFF9ECE6A),Color(0xFFFF9E64),Color(0xFFF7768E),Color(0xFFBB9AF7),Color(0xFFE0AF68),Color(0xFF7DCFFF),Color(0xFF73DACA)];
+  static const _gR=[Color(0xFFC4A7E7),Color(0xFF9CCFD8),Color(0xFFF6C177),Color(0xFFEB6F92),Color(0xFF31748F),Color(0xFFDAC1FF),Color(0xFFEA9A97),Color(0xFF6E6A86)];
+  static const _gO=[Color(0xFF7FD8A0),Color(0xFFB0B0FF),Color(0xFFF0C88B),Color(0xFFFF8FC7),Color(0xFF6EA8FF),Color(0xFFFFE066),Color(0xFF9CCFD8),Color(0xFFC4A7E7)];
   Color colorForExtension(String? ext) {
     if (ext == null || ext.isEmpty) return accent;
     return fileDots[ext.toLowerCase()] ?? accent;
@@ -133,6 +141,8 @@ class IdeConceptsTheme {
       'punc': Color(0x99EEEEF4), // ~0.6 alpha
     },
     syntaxItalic: const {'comment'},
+    indentGuideColors: _gM,
+    bracketPairColors: _gM,
   );
 
   static final paperLight = IdeConceptsTheme(
@@ -192,6 +202,8 @@ class IdeConceptsTheme {
       'punc': Color(0x8C2B2A25), // ~0.55 alpha
     },
     syntaxItalic: const {'comment'},
+    indentGuideColors: _gP,
+    bracketPairColors: _gP,
   );
 
   /// Deep blue-violet night palette inspired by Tokyo Night.
@@ -232,6 +244,8 @@ class IdeConceptsTheme {
       'punc': Color(0x99C0CAF5),
     },
     syntaxItalic: const {'comment'},
+    indentGuideColors: _gT,
+    bracketPairColors: _gT,
   );
 
   /// Muted rose palette inspired by Rosé Pine.
@@ -272,6 +286,8 @@ class IdeConceptsTheme {
       'punc': Color(0x99908CAA),
     },
     syntaxItalic: const {'comment'},
+    indentGuideColors: _gR,
+    bracketPairColors: _gR,
   );
 
   /// Pure OLED black for maximum contrast and focus.
@@ -312,5 +328,7 @@ class IdeConceptsTheme {
       'punc': Color(0x998A8A8A),
     },
     syntaxItalic: const {'comment'},
+    indentGuideColors: _gO,
+    bracketPairColors: _gO,
   );
 }

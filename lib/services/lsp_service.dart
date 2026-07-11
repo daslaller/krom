@@ -237,6 +237,8 @@ class LspService {
     );
   }
 
+  Future<List<LspCodeAction>> getCodeActions(String filePath,int sl,int sc,int el,int ec) async { final c=_clientForPath(filePath); if(c==null)return const[]; return c.getCodeActions(uri:Uri.file(filePath),startLine:sl,startCharacter:sc,endLine:el,endCharacter:ec); }
+  Future<LspSignatureHelp?> getSignatureHelp(String filePath,int line,int character) async { final c=_clientForPath(filePath); if(c==null)return null; return c.getSignatureHelp(uri:Uri.file(filePath),line:line,character:character); }
   // ── Internal ──────────────────────────────────────────────────────────────
 
   void _flushChange(String path) {

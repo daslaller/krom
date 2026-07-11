@@ -10,6 +10,7 @@ import '../../editor/structural_selection.dart';
 import '../../services/settings_service.dart';
 import '../../editor/editor_session.dart';
 import '../../utils/text_position.dart';
+import 'external_change_dialog.dart';
 import 'go_to_line_dialog.dart';
 import 'ide_concepts_theme.dart';
 import 'ide_concepts_themes.dart';
@@ -23,6 +24,7 @@ import 'widgets/outline_panel.dart';
 import 'widgets/sidebar.dart';
 import 'widgets/status_bar.dart';
 import 'widgets/tab_bar.dart';
+import 'widgets/terminal_panel.dart';
 import 'widgets/theme_picker.dart';
 import 'widgets/title_bar.dart';
 
@@ -56,6 +58,7 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
   bool _showFindBar = false;
   bool _findReplaceMode = false;
   bool _showThemePicker = false;
+  bool _showTerminal = false;
   bool _focusOn = false;
   String _initialFindQuery = '';
 
@@ -67,16 +70,17 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
     _session = EditorSession(settings: widget.settings);
     _session.addListener(_onSessionChanged);
     _session.tabController.addListener(_onTabChanged);
-    _registerPaletteCommands();
-    _session.initialize();
+    _session.initialize().then((_) { if (mounted) _registerPaletteCommands(); });
   }
 
   void _onTabChanged() => _structuralSelection.clear();
 
   void _onSessionChanged() {
-    if (mounted) setState(() {});
+    if (mounted) { setState(() {}); _checkExternalChanges(); }
   }
 
+  Future<void> _checkExternalChanges() async { for (final path in _session.pendingExternalChanges.toList()) { if (!mounted) return; final reload = await showExternalChangeDialog(context, _theme, _session.relativePath(path)); if (!mounted) return; if (reload == true) await _session.reloadFileFromDisk(path); else _session.dismissExternalChange(path); } }
+  void _toggleTerminal() => setState(() => _showTerminal = !_showTerminal);
   void _registerPaletteCommands() {
     _session.paletteController.setCommands([
       const PaletteCommandItem(
@@ -157,10 +161,11 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
         hint: 'Shift+F12',
       ),
       const PaletteCommandItem(
-        id: 'toggle-autosave',
-        label: 'Toggle Autosave',
-        hint: 'settings',
-      ),
+        id: 'toggle-autosave', label: 'Toggle Autosave', hint: 'settings'),
+      const PaletteCommandItem(id: 'toggle-terminal', label: 'Toggle Terminal', hint: 'Ctrl+`'),
+      const PaletteCommandItem(id: 'toggle-blame', label: 'Toggle Git Blame', hint: 'git'),
+      const PaletteCommandItem(id: 'stage-file', label: 'Git: Stage File', hint: 'git'),
+      ..._session.extensionPaletteCommands(),
     ]);
   }
 
@@ -325,13 +330,13 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
         await _session.goToDefinition();
       case 'find-references':
         await _session.findReferences();
-      case 'toggle-autosave':
-        await widget.settings.setAutosave(!widget.settings.autosave);
-        setState(() {});
+      case 'toggle-autosave': await widget.settings.setAutosave(!widget.settings.autosave); setState(() {});
+      case 'toggle-terminal': _toggleTerminal();
+      case 'toggle-blame': await _session.toggleBlame();
+      case 'stage-file': await _session.stageActiveFile();
       default:
-        if (id.startsWith('theme:')) {
-          await widget.onSetTheme(id.substring('theme:'.length));
-        }
+        if (id.startsWith('theme:')) await widget.onSetTheme(id.substring('theme:'.length));
+        else if (id.startsWith('ext:')) await _session.runExtensionCommand(id);
     }
   }
 
@@ -422,6 +427,7 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
           shift: true,
           alt: true,
         ): const _ShrinkSelectionIntent(),
+        const SingleActivator(LogicalKeyboardKey.backquote, control: true): const _TerminalIntent(),
       },
       child: Actions(
         actions: {
@@ -484,9 +490,7 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
                 setState(() => _showPalette = false);
               } else if (_showThemePicker) {
                 setState(() => _showThemePicker = false);
-              } else if (_showFindBar) {
-                _closeFindBar();
-              } else if (_showOutline) {
+              } else if (_showFindBar) { _closeFindBar(); } else if (_showTerminal) { setState(() => _showTerminal = false); } else if (_showOutline) {
                 setState(() => _showOutline = false);
               } else if (_focusOn) {
                 setState(() => _focusOn = false);
@@ -509,12 +513,8 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
               return null;
             },
           ),
-          _ShrinkSelectionIntent: CallbackAction<_ShrinkSelectionIntent>(
-            onInvoke: (_) {
-              _shrinkSelection();
-              return null;
-            },
-          ),
+          _ShrinkSelectionIntent: CallbackAction<_ShrinkSelectionIntent>(onInvoke: (_) { _shrinkSelection(); return null; }),
+          _TerminalIntent: CallbackAction<_TerminalIntent>(onInvoke: (_) => _toggleTerminal()),
         },
         child: Focus(
           focusNode: _focusNode,
@@ -609,6 +609,7 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
                                           ),
                                         ],
                                       ),
+                                      if (_showTerminal && !_focusOn) BottomPanelHost(theme: theme, visible: _showTerminal, title: 'Terminal', onClose: () => setState(() => _showTerminal = false), child: TerminalPanel(theme: theme, workingDirectory: _session.rootPath)),
                                       if (_showFindBar && !_focusOn)
                                         Positioned(
                                           left: 0,
@@ -648,6 +649,7 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
                         activeTab: _session.tabController.activeTab,
                         focusOn: _focusOn,
                         autosaveOn: widget.settings.autosave,
+                        blameHint: _session.showBlame ? _session.hoveredBlame?.summary : null,
                         onExitFocus: _toggleFocus,
                       ),
                     ),
@@ -692,6 +694,10 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
           focusOn: _focusOn,
           lspService: _session.lspService,
           onChanged: _session.onEditorChanged,
+          diffMarkers: _session.diffForPath(tab.filePath),
+          showBlame: _session.showBlame,
+          blame: _session.blameForPath(tab.filePath),
+          onBlameHover: (_, info) => _session.setHoveredBlame(info),
         );
       },
     );
@@ -886,6 +892,5 @@ class _ExpandSelectionIntent extends Intent {
   const _ExpandSelectionIntent();
 }
 
-class _ShrinkSelectionIntent extends Intent {
-  const _ShrinkSelectionIntent();
-}
+class _ShrinkSelectionIntent extends Intent { const _ShrinkSelectionIntent(); }
+class _TerminalIntent extends Intent { const _TerminalIntent(); }

@@ -3,10 +3,14 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:lsp_client/lsp_client.dart';
+import 'package:path/path.dart' as p;
 
 import '../command_palette/command_palette_controller.dart';
+import '../command_palette/palette_item.dart';
+import '../extensions/extension_manifest.dart';
 import '../panels/file_tree/file_tree_service.dart';
 import '../services/file_service.dart';
+import '../services/file_watcher_service.dart';
 import '../services/git_service.dart';
 import '../services/lsp_service.dart';
 import '../services/parser_service.dart';
@@ -26,9 +30,11 @@ class EditorSession extends ChangeNotifier {
         paletteController = CommandPaletteController(),
         fileService = FileService(),
         treeService = FileTreeService(),
-        gitService = GitService() {
+        gitService = GitService(),
+        fileWatcher = FileWatcherService() {
     lspService = LspService(this.settings);
     parserService = ParserService(this.settings);
+    fileWatcher.onExternalChange = _onExternalFileChange;
   }
 
   final SettingsService settings;
@@ -37,31 +43,59 @@ class EditorSession extends ChangeNotifier {
   final FileService fileService;
   final FileTreeService treeService;
   final GitService gitService;
+  final FileWatcherService fileWatcher;
   late final LspService lspService;
   late final ParserService parserService;
 
   final Map<String, KromAnalyzer> _analyzers = {};
   final Map<String, KromAutocompleter> _autocompleters = {};
+  final Map<String, FileDiffMarkers> _diffByPath = {};
+  final Map<String, Map<int, BlameLine>> _blameByPath = {};
+  final Set<String> _pendingExternalChanges = {};
+  final List<ExtensionManifest> _extensions = [];
 
   String? rootPath;
   GitStatus gitStatus = const GitStatus();
   bool useParser = true;
+  bool showBlame = false;
+  BlameLine? hoveredBlame;
   Timer? _autosaveTimer;
+  Timer? _gitRefreshTimer;
+  FileDiffMarkers diffForPath(String p) => _diffByPath[p] ?? const FileDiffMarkers();
+  Map<int, BlameLine> blameForPath(String p) => _blameByPath[p] ?? {};
+  Set<String> get pendingExternalChanges => Set.unmodifiable(_pendingExternalChanges);
+  List<PaletteCommandItem> extensionPaletteCommands() { final o=<PaletteCommandItem>[]; for(final e in _extensions){for(final c in e.commands){o.add(PaletteCommandItem(id:c.paletteId(e.id),label:c.label,hint:c.hint??e.name));}} return o; }
+  Future<void> runExtensionCommand(String id) async { if(!id.startsWith('ext:'))return; final p=id.split(':'); if(p.length<3)return; for(final e in _extensions){if(e.id!=p[1])continue; for(final c in e.commands){if(c.id==p.sublist(2).join(':')) await ExtensionLoader.runCommandAction(e,c);}} }
+  Future<void> refreshGitDecorations() async { _diffByPath.clear(); if(rootPath==null)return; for(final t in tabController.tabs){final m=await gitService.diffMarkers(rootPath,t.filePath); if(!m.isEmpty)_diffByPath[t.filePath]=m;} if(showBlame){_blameByPath.clear(); for(final t in tabController.tabs)_blameByPath[t.filePath]=await gitService.blame(rootPath,t.filePath);} notifyListeners(); }
+  Future<void> toggleBlame() async { showBlame=!showBlame; if(showBlame) await refreshGitDecorations(); else {_blameByPath.clear(); hoveredBlame=null;} notifyListeners(); }
+  void setHoveredBlame(BlameLine? l){if(hoveredBlame==l)return; hoveredBlame=l; notifyListeners();}
+  Future<bool> stageActiveFile() async { final t=tabController.activeTab; if(t==null||rootPath==null)return false; final ok=await gitService.stageFile(rootPath,t.filePath); if(ok){await refreshGitStatus(); await refreshGitDecorations();} return ok; }
+  void _scheduleGitRefresh(){_gitRefreshTimer?.cancel(); _gitRefreshTimer=Timer(const Duration(milliseconds:500),(){refreshGitDecorations(); refreshGitStatus();});}
+  void _onExternalFileChange(Set<String> paths){for(final path in paths){final i=tabController.tabs.indexWhere((t)=>t.filePath==path); if(i>=0&&!tabController.tabs[i].isDirty)_pendingExternalChanges.add(path);} if(_pendingExternalChanges.isNotEmpty)notifyListeners();}
+  void dismissExternalChange(String path){_pendingExternalChanges.remove(path); notifyListeners();}
+  Future<void> reloadFileFromDisk(String path) async {_pendingExternalChanges.remove(path); final i=tabController.tabs.indexWhere((t)=>t.filePath==path); if(i<0)return; try{final c=await fileService.readFile(path); final t=tabController.tabs[i]; t.codeController.text=c; t.content=c; tabController.markClean(i); final lid=LspService.languageIdFromPath(path); if(lid!=null)lspService.scheduleChange(path,lid,c); await refreshGitDecorations(); notifyListeners();}catch(_){}}
+  String relativePath(String path){final r=rootPath; if(r!=null&&path.startsWith(r))return path.substring(r.length+1).replaceAll('\\','/'); return p.basename(path);}
 
   Future<void> initialize() async {
-    await settings.load();
+    final cwd=Directory.current.path;
+    await settings.load(workspaceRoot: cwd);
     useParser = settings.useTreeSitter;
     await parserService.initialize();
-    await openFolder(Directory.current.path);
+    _extensions.addAll(await ExtensionLoader.loadAll());
+    await openFolder(cwd);
   }
 
   Future<void> openFolder(String path) async {
     rootPath = path;
+    await settings.loadProjectOverrides(path);
+    useParser = settings.useTreeSitter;
     final files = await treeService.allFilePaths(path);
     paletteController.setFiles(files, path);
     gitStatus = await gitService.status(path);
+    fileWatcher.watch(path);
     notifyListeners();
     await lspService.initialize(path);
+    await refreshGitDecorations();
   }
 
   Future<void> refreshGitStatus() async {
@@ -100,6 +134,8 @@ class EditorSession extends ChangeNotifier {
           character: revealCharacter ?? 0,
         );
       }
+      _scheduleGitRefresh();
+      if(showBlame)_blameByPath[path]=await gitService.blame(rootPath,path);
       notifyListeners();
     } catch (_) {}
   }
@@ -152,6 +188,8 @@ class EditorSession extends ChangeNotifier {
       lspService.closeDocument(path, languageId);
     }
     _closeParser(path);
+    _diffByPath.remove(path);
+    _blameByPath.remove(path);
   }
 
   Future<void> saveFileAt(int index) async {
@@ -163,6 +201,7 @@ class EditorSession extends ChangeNotifier {
     tab.content = content;
     tabController.markClean(index);
     await refreshGitStatus();
+    _scheduleGitRefresh();
     notifyListeners();
   }
 
@@ -201,6 +240,7 @@ class EditorSession extends ChangeNotifier {
       _autosaveTimer?.cancel();
       _autosaveTimer = Timer(const Duration(seconds: 2), saveActiveFile);
     }
+    _scheduleGitRefresh();
     notifyListeners();
   }
 
@@ -209,6 +249,7 @@ class EditorSession extends ChangeNotifier {
     final path = tabController.tabs[index].filePath;
     tabController.closeTab(index);
     _closeLsp(path);
+    _pendingExternalChanges.remove(path);
     notifyListeners();
   }
 
@@ -306,6 +347,7 @@ class EditorSession extends ChangeNotifier {
       }
     }
     await refreshGitStatus();
+    _scheduleGitRefresh();
     notifyListeners();
   }
 
@@ -347,6 +389,8 @@ class EditorSession extends ChangeNotifier {
   @override
   void dispose() {
     _autosaveTimer?.cancel();
+    _gitRefreshTimer?.cancel();
+    fileWatcher.dispose();
     tabController.dispose();
     paletteController.dispose();
     for (final a in _analyzers.values) {

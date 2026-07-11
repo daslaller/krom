@@ -1,101 +1,21 @@
-import 'dart:convert';
-import 'dart:io';
-
-import 'package:path/path.dart' as p;
-
-/// Loads Krom settings from a JSON file in the OS config directory.
-///
-/// Location:
-///   Windows: %APPDATA%\Krom\settings.json
-///   Linux/macOS: ~/.config/krom/settings.json
-///
-/// Keys (all optional):
-///   githubToken        — GitHub personal access token (Phase 4)
-///   anthropicApiKey    — Anthropic API key (Phase 4)
-///   languageServers    — Map of languageId → command list (overrides defaults)
-///   parserCommand      — Command to spawn krom-parser, e.g.
-///                        ["/path/to/krom-parser", "--plugin-dir", "/path/to/plugins"]
-///   useTreeSitter      — Use krom-parser for syntax highlighting (default true)
+import 'dart:convert'; import 'dart:io'; import 'package:path/path.dart' as p;
 class SettingsService {
-  Map<String, dynamic> _data = {};
-
-  Future<void> load() async {
-    final file = _settingsFile();
-    if (file.existsSync()) {
-      try {
-        _data = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
-      } catch (_) {
-        // Corrupt settings file — use defaults.
-      }
-    }
-  }
-
-  /// Returns the server command for [languageId], falling back to built-in defaults.
-  List<String> serverCommand(String languageId) {
-    final overrides = _data['languageServers'] as Map?;
-    final cmd = overrides?[languageId];
-    if (cmd is List) return cmd.cast<String>();
-    return _defaults[languageId] ?? const [];
-  }
-
-  /// All language IDs with a configured server command.
-  List<String> configuredLanguageIds() {
-    final ids = <String>{..._defaults.keys};
-    final overrides = _data['languageServers'] as Map?;
-    if (overrides != null) {
-      ids.addAll(overrides.keys.cast<String>());
-    }
-    return ids.where((id) => serverCommand(id).isNotEmpty).toList();
-  }
-
-  /// Command to spawn the krom-parser daemon.
-  List<String> get parserCommand {
-    final cmd = _data['parserCommand'];
-    if (cmd is List) return cmd.cast<String>();
-    return const [];
-  }
-
-  /// Whether to prefer krom-parser over highlight.js for syntax highlighting.
+  Map<String,dynamic> _global={}; Map<String,dynamic> _project={}; String? _workspaceRoot;
+  Map<String,dynamic> get _data => {..._global,..._project};
+  Future<void> load({String? workspaceRoot}) async { _workspaceRoot=workspaceRoot; _global=await _read(_settingsFile()); _project=workspaceRoot!=null?await _read(_projectFile(workspaceRoot)):{}; }
+  Future<void> loadProjectOverrides(String? workspaceRoot) async { _workspaceRoot=workspaceRoot; _project=workspaceRoot!=null?await _read(_projectFile(workspaceRoot)):{}; }
+  List<String> serverCommand(String id){ final o=_data['languageServers'] as Map?; final c=o?[id]; if(c is List) return c.cast<String>(); return _defaults[id]??const[]; }
+  List<String> configuredLanguageIds(){ final ids=<String>{..._defaults.keys}; final o=_data['languageServers'] as Map?; if(o!=null) ids.addAll(o.keys.cast<String>()); return ids.where(serverCommand).toList(); }
+  List<String> get parserCommand{ final c=_data['parserCommand']; if(c is List) return c.cast<String>(); return const[]; }
   bool get useTreeSitter => _data['useTreeSitter'] as bool? ?? true;
-
-  /// UI theme id — see [IdeConceptsThemes] for built-in ids.
   String get themeId => _data['theme'] as String? ?? 'midnight-indigo';
-
-  bool get isDark {
-    final id = themeId;
-    return id != 'paper-light' && id != 'light';
-  }
-
-  /// Autosave dirty files after edits settle.
+  bool get isDark => themeId!='paper-light'&&themeId!='light';
   bool get autosave => _data['autosave'] as bool? ?? true;
-
-  Future<void> setTheme(String theme) async {
-    _data['theme'] = theme;
-    await _save();
-  }
-
-  Future<void> setAutosave(bool enabled) async {
-    _data['autosave'] = enabled;
-    await _save();
-  }
-
-  Future<void> _save() async {
-    final file = _settingsFile();
-    await file.parent.create(recursive: true);
-    await file.writeAsString(const JsonEncoder.withIndent('  ').convert(_data));
-  }
-
-  static const _defaults = <String, List<String>>{
-    'dart': ['dart', 'language-server', '--protocol=lsp'],
-    // Configure additional servers in settings.json, e.g.:
-    // 'python': ['pyright-langserver', '--stdio'],
-    // 'typescript': ['typescript-language-server', '--stdio'],
-  };
-
-  File _settingsFile() {
-    final dir = Platform.isWindows
-        ? p.join(Platform.environment['APPDATA'] ?? '', 'Krom')
-        : p.join(Platform.environment['HOME'] ?? '', '.config', 'krom');
-    return File(p.join(dir, 'settings.json'));
-  }
+  Future<void> setTheme(String t) async { _global['theme']=t; await _save(); }
+  Future<void> setAutosave(bool e) async { _global['autosave']=e; await _save(); }
+  Future<void> _save() async { final f=_settingsFile(); await f.parent.create(recursive:true); await f.writeAsString(const JsonEncoder.withIndent('  ').convert(_global)); }
+  static Future<Map<String,dynamic>> _read(File f) async { if(!f.existsSync()) return {}; try{return jsonDecode(f.readAsStringSync()) as Map<String,dynamic>;}catch(_){return{};} }
+  static const _defaults=<String,List<String>>{'dart':['dart','language-server','--protocol=lsp']};
+  File _settingsFile(){ final d=Platform.isWindows?p.join(Platform.environment['APPDATA']??'','Krom'):p.join(Platform.environment['HOME']??'','.config','krom'); return File(p.join(d,'settings.json')); }
+  static File _projectFile(String r)=>File(p.join(r,'.krom','settings.json'));
 }

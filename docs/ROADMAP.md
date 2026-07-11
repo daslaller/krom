@@ -128,7 +128,7 @@ IdeConceptsThemes registry
 
 ---
 
-## Phase 4 — Workspace Intelligence ⬜
+## Phase 4 — Workspace Intelligence ✅
 
 - Git: inline diff gutters, stage hunks, blame toggle
 - Terminal panel (`Ctrl+`` `)

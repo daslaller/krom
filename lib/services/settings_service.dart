@@ -58,10 +58,13 @@ class SettingsService {
   /// Whether to prefer krom-parser over highlight.js for syntax highlighting.
   bool get useTreeSitter => _data['useTreeSitter'] as bool? ?? true;
 
-  /// UI theme id: `dark` (Midnight Indigo) or `light` (Paper Light).
-  String get themeId => _data['theme'] as String? ?? 'dark';
+  /// UI theme id — see [IdeConceptsThemes] for built-in ids.
+  String get themeId => _data['theme'] as String? ?? 'midnight-indigo';
 
-  bool get isDark => themeId != 'light';
+  bool get isDark {
+    final id = themeId;
+    return id != 'paper-light' && id != 'light';
+  }
 
   /// Autosave dirty files after edits settle.
   bool get autosave => _data['autosave'] as bool? ?? true;

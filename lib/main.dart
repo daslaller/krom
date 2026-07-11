@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'frontends/ide_concepts/ide_concepts_page.dart';
 import 'frontends/ide_concepts/ide_concepts_theme.dart';
+import 'frontends/ide_concepts/ide_concepts_themes.dart';
 import 'services/settings_service.dart';
 import 'theme/krom_theme.dart';
 
@@ -18,7 +19,7 @@ class KromApp extends StatefulWidget {
 class _KromAppState extends State<KromApp> {
   final _settings = SettingsService();
   bool _ready = false;
-  bool _isDark = true;
+  String _themeId = IdeConceptsThemes.defaultId;
 
   @override
   void initState() {
@@ -26,16 +27,24 @@ class _KromAppState extends State<KromApp> {
     _settings.load().then((_) {
       if (!mounted) return;
       setState(() {
-        _isDark = _settings.isDark;
+        _themeId = IdeConceptsThemes.normalizeId(_settings.themeId);
         _ready = true;
       });
     });
   }
 
-  Future<void> _toggleTheme() async {
-    setState(() => _isDark = !_isDark);
-    await _settings.setTheme(_isDark ? 'dark' : 'light');
+  Future<void> _setThemeId(String themeId) async {
+    final normalized = IdeConceptsThemes.normalizeId(themeId);
+    setState(() => _themeId = normalized);
+    await _settings.setTheme(normalized);
   }
+
+  Future<void> _cycleTheme() async {
+    final next = IdeConceptsThemes.nextId(_themeId);
+    if (next != null) await _setThemeId(next);
+  }
+
+  IdeConceptsTheme get _conceptsTheme => IdeConceptsThemes.resolve(_themeId);
 
   @override
   Widget build(BuildContext context) {
@@ -45,8 +54,7 @@ class _KromAppState extends State<KromApp> {
       );
     }
 
-    final conceptsTheme =
-        _isDark ? IdeConceptsTheme.midnightIndigo : IdeConceptsTheme.paperLight;
+    final conceptsTheme = _conceptsTheme;
 
     return MaterialApp(
       title: 'Krom',
@@ -54,8 +62,9 @@ class _KromAppState extends State<KromApp> {
       theme: KromTheme.fromIdeConcepts(conceptsTheme),
       home: IdeConceptsPage(
         settings: _settings,
-        isDark: _isDark,
-        onToggleTheme: _toggleTheme,
+        themeId: _themeId,
+        onCycleTheme: _cycleTheme,
+        onSetTheme: _setThemeId,
       ),
     );
   }

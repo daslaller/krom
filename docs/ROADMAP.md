@@ -151,7 +151,7 @@ IdeConceptsThemes registry
 
 ```
 Phase 0  ✅  Shell, LSP, outline, structural selection, themes
-Phase 1  🚧  Find/replace, rename, LSP outline, theme picker, motion tokens
+Phase 1  ✅  Find/replace, rename, LSP outline, theme picker, motion tokens
 Phase 2      Workspace search, problems, code actions, minimap, splits
 Phase 3      User themes, semantic tokens, motion polish pass
 Phase 4      Terminal, git diff, file watcher

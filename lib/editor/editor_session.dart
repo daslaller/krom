@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:lsp_client/lsp_client.dart';
 
 import '../command_palette/command_palette_controller.dart';
-import '../command_palette/palette_item.dart';
 import '../panels/file_tree/file_tree_service.dart';
 import '../services/file_service.dart';
 import '../services/git_service.dart';
@@ -276,6 +276,72 @@ class EditorSession extends ChangeNotifier {
     if (tab == null) return;
     tab.codeController.revealPosition(line.clamp(0, 1 << 20));
     notifyListeners();
+  }
+
+  /// Applies an LSP workspace edit to open tabs and files on disk.
+  Future<void> applyWorkspaceEdit(LspWorkspaceEdit edit) async {
+    for (final entry in edit.changes.entries) {
+      final path = Uri.parse(entry.key).toFilePath();
+      final edits = entry.value;
+      final index = tabController.tabs.indexWhere((t) => t.filePath == path);
+      if (index >= 0) {
+        final tab = tabController.tabs[index];
+        final updated = applyTextEdits(tab.codeController.fullText, edits);
+        if (updated != tab.codeController.fullText) {
+          tab.codeController.text = updated;
+          tabController.markDirty(index);
+          final languageId = LspService.languageIdFromPath(path);
+          if (languageId != null) {
+            lspService.scheduleChange(path, languageId, updated);
+          }
+        }
+      } else {
+        try {
+          final content = await fileService.readFile(path);
+          final updated = applyTextEdits(content, edits);
+          if (updated != content) {
+            await fileService.writeFile(path, updated);
+          }
+        } catch (_) {}
+      }
+    }
+    await refreshGitStatus();
+    notifyListeners();
+  }
+
+  /// Renames the symbol at the cursor via LSP. Returns false if rename failed.
+  Future<bool> renameSymbol(String newName) async {
+    final tab = tabController.activeTab;
+    if (tab == null || newName.isEmpty) return false;
+    final offset = tab.codeController.selection.baseOffset;
+    if (offset < 0) return false;
+    final text = tab.codeController.fullText;
+    final (line, character) = offsetToLineChar(text, offset);
+    final edit = await lspService.rename(
+      tab.filePath,
+      line,
+      character,
+      newName,
+    );
+    if (edit == null) return false;
+    await applyWorkspaceEdit(edit);
+    return true;
+  }
+
+  /// Returns the placeholder name for rename at cursor, or null.
+  Future<String?> prepareRenamePlaceholder() async {
+    final tab = tabController.activeTab;
+    if (tab == null) return null;
+    final offset = tab.codeController.selection.baseOffset;
+    if (offset < 0) return null;
+    final text = tab.codeController.fullText;
+    final (line, character) = offsetToLineChar(text, offset);
+    final prepared = await lspService.prepareRename(
+      tab.filePath,
+      line,
+      character,
+    );
+    return prepared?.placeholder;
   }
 
   @override

@@ -32,6 +32,7 @@ import 'widgets/problems_panel.dart';
 import 'widgets/split_editor.dart';
 import 'widgets/tab_bar.dart';
 import 'external_change_dialog.dart';
+import 'widgets/chat_panel.dart';
 import 'widgets/terminal_panel.dart';
 import 'widgets/workspace_search_panel.dart';
 import 'widgets/theme_picker.dart';
@@ -81,6 +82,7 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
   bool _showProblems = false;
   bool _showCodeActions = false;
   bool _showTerminal = false;
+  bool _showChat = false;
   bool _focusOn = false;
   SplitDirection _splitDirection = SplitDirection.none;
   int? _secondaryTabIndex;
@@ -238,6 +240,11 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
         id: 'stage-file',
         label: 'Git: Stage File',
         hint: 'git',
+      ),
+      const PaletteCommandItem(
+        id: 'toggle-chat',
+        label: 'Toggle AI Chat',
+        hint: 'assistant',
       ),
       ..._session.extensionPaletteCommands(),
     ]);
@@ -487,6 +494,9 @@ class _IdeConceptsPageState extends State<IdeConceptsPage> {
       case 'stage-file':
         await _session.stageActiveFile();
         break;
+      case 'toggle-chat':
+        setState(() => _showChat = !_showChat);
+        break;
       default:
         if (id.startsWith('theme:')) {
           await widget.onSetTheme(id.substring('theme:'.length));
@@ -668,6 +678,8 @@ void _closeActiveTab() {
                 setState(() => _showWorkspaceSearch = false);
               } else if (_showProblems) {
                 setState(() => _showProblems = false);
+              } else if (_showChat) {
+                setState(() => _showChat = false);
               } else if (_showTerminal) {
                 setState(() => _showTerminal = false);
               } else if (_showOutline) {
@@ -773,6 +785,20 @@ void _closeActiveTab() {
                                       Row(
                                         children: [
                                           Expanded(child: _buildEditorArea(theme)),
+                                          AnimatedContainer(
+                                            duration: KromMotion.panelDuration,
+                                            curve: KromMotion.panelCurve,
+                                            width: _showChat && !_focusOn ? 320 : 0,
+                                            child: _showChat && !_focusOn
+                                                ? IdeConceptsChatPanel(
+                                                    theme: theme,
+                                                    session: _session,
+                                                    settings: widget.settings,
+                                                    onClose: () =>
+                                                        setState(() => _showChat = false),
+                                                  )
+                                                : const SizedBox.shrink(),
+                                          ),
                                           AnimatedContainer(
                                             duration: KromMotion.panelDuration,
                                             curve: KromMotion.panelCurve,
@@ -904,6 +930,9 @@ void _closeActiveTab() {
             blameForPath: _session.blameForPath,
             showBlame: _session.showBlame,
             onBlameHover: (_, info) => _session.setHoveredBlame(info),
+            ghostService: _session.ghostCompletionService,
+            onReferencesTap: (line, character) =>
+                _session.openReferencesAt(line, character),
             secondaryIndex: _secondaryTabIndex,
           );
         }
@@ -922,6 +951,9 @@ void _closeActiveTab() {
           showBlame: _session.showBlame,
           blame: _session.blameForPath(tab.filePath),
           onBlameHover: (_, info) => _session.setHoveredBlame(info),
+          ghostService: _session.ghostCompletionService,
+          onReferencesTap: (line, character) =>
+              _session.openReferencesAt(line, character),
         );
       },
     );

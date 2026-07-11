@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lsp_client/lsp_client.dart';
 import '../ide_concepts_theme.dart';
 
+import '../../../services/ghost_completion_service.dart';
 import '../../../services/git_service.dart';
 import '../../../editor/navigation_pulse.dart';
 import '../../../editor/tab_controller.dart';
@@ -30,6 +31,8 @@ class SplitEditorView extends StatelessWidget {
     this.blameForPath,
     this.showBlame = false,
     this.onBlameHover,
+    this.ghostService,
+    this.onReferencesTap,
     this.secondaryIndex,
   });
 
@@ -47,6 +50,8 @@ class SplitEditorView extends StatelessWidget {
   final Map<int, BlameLine> Function(String path)? blameForPath;
   final bool showBlame;
   final void Function(int line, BlameLine? info)? onBlameHover;
+  final GhostCompletionService? ghostService;
+  final void Function(int line, int character)? onReferencesTap;
   final int? secondaryIndex;
 
   @override
@@ -125,6 +130,8 @@ class SplitEditorView extends StatelessWidget {
             showBlame: showBlame,
             blame: paneBlame,
             onBlameHover: onBlameHover,
+            ghostService: ghostService,
+            onReferencesTap: onReferencesTap,
           ),
         ),
       ],

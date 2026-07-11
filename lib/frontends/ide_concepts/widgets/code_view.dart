@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
 import 'package:lsp_client/lsp_client.dart';
 
@@ -6,13 +7,17 @@ import '../../../editor/hover_tooltip.dart';
 import '../../../editor/indent_guides.dart';
 import '../../../editor/navigation_pulse.dart';
 import '../../../editor/tab_model.dart';
+import '../../../services/ghost_completion_service.dart';
 import '../../../services/git_service.dart';
 import '../../../services/lsp_service.dart';
+import '../../../utils/text_position.dart';
 import '../ide_concepts_code_theme.dart';
 import '../ide_concepts_theme.dart';
 import '../ide_fonts.dart';
 import '../krom_motion.dart';
+import 'code_lens_overlay.dart';
 import 'editor_minimap.dart';
+import 'ghost_completion_overlay.dart';
 import 'git_gutter.dart';
 import 'signature_help_popup.dart';
 
@@ -33,6 +38,8 @@ class IdeConceptsCodeView extends StatefulWidget {
     this.showBlame = false,
     this.blame = const {},
     this.onBlameHover,
+    this.ghostService,
+    this.onReferencesTap,
   });
 
   final IdeConceptsTheme theme;
@@ -48,6 +55,8 @@ class IdeConceptsCodeView extends StatefulWidget {
   final bool showBlame;
   final Map<int, BlameLine> blame;
   final void Function(int line, BlameLine? info)? onBlameHover;
+  final GhostCompletionService? ghostService;
+  final void Function(int line, int character)? onReferencesTap;
 
   @override
   State<IdeConceptsCodeView> createState() => _IdeConceptsCodeViewState();
@@ -77,6 +86,8 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView>
     );
     _scrollController.addListener(_onScroll);
     widget.navigationPulse?.addListener(_onNavigationPulse);
+    widget.ghostService?.addListener(_onGhostChanged);
+    widget.tab.codeController.addListener(_onGhostChanged);
     widget.tab.codeController.configureBracketColors(
       widget.theme.bracketPairColors,
     );
@@ -94,14 +105,28 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView>
         widget.theme.bracketPairColors,
       );
     }
+    if (oldWidget.ghostService != widget.ghostService) {
+      oldWidget.ghostService?.removeListener(_onGhostChanged);
+      widget.ghostService?.addListener(_onGhostChanged);
+    }
+    if (oldWidget.tab != widget.tab) {
+      oldWidget.tab.codeController.removeListener(_onGhostChanged);
+      widget.tab.codeController.addListener(_onGhostChanged);
+    }
     if (oldWidget.tab.filePath != widget.tab.filePath) {
       _signatureHelp = null;
     }
   }
 
+  void _onGhostChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
     widget.navigationPulse?.removeListener(_onNavigationPulse);
+    widget.ghostService?.removeListener(_onGhostChanged);
+    widget.tab.codeController.removeListener(_onGhostChanged);
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _pulseController.dispose();
@@ -137,15 +162,41 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView>
 
   Future<void> _handleChanged(String text) async {
     widget.onChanged?.call();
+    final offset =
+        widget.tab.codeController.selection.baseOffset.clamp(0, text.length);
+    widget.ghostService?.schedule(
+      fileText: text,
+      cursorOffset: offset,
+      filePath: widget.tab.filePath,
+    );
     final helpFn = widget.onSignatureHelp;
     if (helpFn == null) return;
-    final offset = widget.tab.codeController.selection.baseOffset;
     if (offset > 0 && text[offset - 1] == '(') {
       final help = await helpFn();
       if (mounted) setState(() => _signatureHelp = help);
     } else if (_signatureHelp != null) {
       setState(() => _signatureHelp = null);
     }
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent ||
+        event.logicalKey != LogicalKeyboardKey.tab) {
+      return KeyEventResult.ignored;
+    }
+    final ghost = widget.ghostService;
+    if (ghost?.suggestion == null) return KeyEventResult.ignored;
+    final text = widget.tab.codeController.fullText;
+    final offset =
+        widget.tab.codeController.selection.baseOffset.clamp(0, text.length);
+    acceptGhostSuggestion(
+      controller: widget.tab.codeController,
+      service: ghost!,
+      fileText: text,
+      cursorOffset: offset,
+    );
+    widget.onChanged?.call();
+    return KeyEventResult.handled;
   }
 
   void _scrollToFraction(double fraction) {
@@ -160,6 +211,10 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView>
     double verticalPad,
     List<List<IndentGuideDot>> indentDots,
     int? pulseLine,
+    int line,
+    int column,
+    int cursorOffset,
+    String text,
   ) {
     final scrollFraction = _maxScrollExtent <= 0
         ? 0.0
@@ -238,6 +293,29 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView>
               help: _signatureHelp!,
             ),
           ),
+        GhostCompletionOverlay(
+          theme: theme,
+          suggestion: widget.ghostService?.suggestion,
+          line: line,
+          column: column,
+          lineHeight: _lineHeight,
+          charWidth: _charWidth,
+          gutterWidth: _gutterWidth,
+          horizontalPad: _horizontalPad,
+          verticalPad: verticalPad,
+        ),
+        CodeLensOverlay(
+          theme: theme,
+          lspService: widget.lspService,
+          filePath: tab.filePath,
+          fileText: text,
+          cursorOffset: cursorOffset,
+          lineHeight: _lineHeight,
+          gutterWidth: _gutterWidth,
+          horizontalPad: _horizontalPad,
+          verticalPad: verticalPad,
+          onReferencesTap: widget.onReferencesTap,
+        ),
       ],
     );
   }
@@ -249,6 +327,10 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView>
     final verticalPad = widget.focusOn ? 56.0 : 18.0;
     final indentDots = IndentGuideAnalyzer.analyze(tab.codeController.fullText);
     final pulseLine = widget.navigationPulse?.line;
+    final text = tab.codeController.fullText;
+    final cursorOffset =
+        tab.codeController.selection.baseOffset.clamp(0, text.length);
+    final (line, column) = offsetToLineChar(text, cursorOffset);
     final hasDiff = widget.diffMarkers.addedLines.isNotEmpty ||
         widget.diffMarkers.removedLines.isNotEmpty;
 
@@ -292,6 +374,10 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView>
       verticalPad,
       indentDots,
       pulseLine,
+      line,
+      column,
+      cursorOffset,
+      text,
     );
 
     return ColoredBox(
@@ -302,7 +388,9 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView>
           constraints: BoxConstraints(
             maxWidth: widget.focusOn ? 860 : double.infinity,
           ),
-          child: ListenableBuilder(
+          child: Focus(
+            onKeyEvent: _onKey,
+            child: ListenableBuilder(
             listenable: tab.codeController,
             builder: (context, _) {
               final lineCount =
@@ -331,6 +419,7 @@ class _IdeConceptsCodeViewState extends State<IdeConceptsCodeView>
                 ],
               );
             },
+          ),
           ),
         ),
       ),

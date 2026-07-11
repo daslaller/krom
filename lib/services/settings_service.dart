@@ -5,7 +5,7 @@ class SettingsService {
   Future<void> load({String? workspaceRoot}) async { _workspaceRoot=workspaceRoot; _global=await _read(_settingsFile()); _project=workspaceRoot!=null?await _read(_projectFile(workspaceRoot)):{}; }
   Future<void> loadProjectOverrides(String? workspaceRoot) async { _workspaceRoot=workspaceRoot; _project=workspaceRoot!=null?await _read(_projectFile(workspaceRoot)):{}; }
   List<String> serverCommand(String id){ final o=_data['languageServers'] as Map?; final c=o?[id]; if(c is List) return c.cast<String>(); return _defaults[id]??const[]; }
-  List<String> configuredLanguageIds(){ final ids=<String>{..._defaults.keys}; final o=_data['languageServers'] as Map?; if(o!=null) ids.addAll(o.keys.cast<String>()); return ids.where(serverCommand).toList(); }
+  List<String> configuredLanguageIds(){ final ids=<String>{..._defaults.keys}; final o=_data['languageServers'] as Map?; if(o!=null) ids.addAll(o.keys.cast<String>()); return ids.where((id) => serverCommand(id).isNotEmpty).toList(); }
   List<String> get parserCommand{ final c=_data['parserCommand']; if(c is List) return c.cast<String>(); return const[]; }
   bool get useTreeSitter => _data['useTreeSitter'] as bool? ?? true;
   String get themeId => _data['theme'] as String? ?? 'midnight-indigo';

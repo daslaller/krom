@@ -69,6 +69,13 @@ class SettingsService {
   /// Autosave dirty files after edits settle.
   bool get autosave => _data['autosave'] as bool? ?? true;
 
+  String? get anthropicApiKey => _data['anthropicApiKey'] as String?;
+  String? get githubToken => _data['githubToken'] as String?;
+  bool get hasAnthropicKey {
+    final key = anthropicApiKey;
+    return key != null && key.isNotEmpty;
+  }
+
   Future<void> setTheme(String theme) async {
     _data['theme'] = theme;
     await _save();

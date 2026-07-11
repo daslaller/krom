@@ -24,6 +24,8 @@ class KromAnalyzer extends AbstractAnalyzer {
   List<Issue> _issues = const [];
   StreamSubscription<List<Issue>>? _sub;
 
+  List<Issue> get lastIssues => _issues;
+
   @override
   Future<AnalysisResult> analyze(Code code) async =>
       AnalysisResult(issues: _issues);

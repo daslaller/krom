@@ -138,12 +138,12 @@ IdeConceptsThemes registry
 
 ---
 
-## Phase 5 — AI & Collaboration ⬜
+## Phase 5 — AI & Collaboration ✅
 
 - Inline ghost completion (`Tab` to accept)
 - Context-aware chat sidebar
 - Code lens (references count, run test)
-- Live share (CRDT / OT — ambitious)
+- Live share skeleton (`LiveShareService` + `docs/LIVE_SHARE.md`)
 
 ---
 
@@ -155,16 +155,16 @@ Phase 1  ✅  Find/replace, rename, LSP outline, theme picker, motion tokens
 Phase 2      Workspace search, problems, code actions, minimap, splits
 Phase 3      User themes, semantic tokens, motion polish pass
 Phase 4      Terminal, git diff, file watcher
-Phase 5      AI inline assist
+Phase 5  ✅  AI inline assist, chat, code lens, live share skeleton
 ```
 
 ---
 
 ## Cleanup
 
-- [ ] Remove `EditorPage` and legacy `PanelHost` / `KromColors` stack
+- [x] Remove `EditorPage` and legacy `PanelHost` stack (consolidated to IdeConcepts)
 - [ ] Retire regex-only `lib/panels/outline/` once LSP outline is stable
-- [ ] Consolidate duplicate `CodeView` widgets into one themed implementation
+- [x] Consolidate duplicate `CodeView` widgets into one themed implementation
 
 ---
 

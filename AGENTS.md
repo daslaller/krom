@@ -41,3 +41,10 @@ Standard Flutter/Dart commands apply; only the non-obvious cloud caveats are cap
   `flutter run`) to re-index.
 - `Dart_LSP_Client` must be a standalone `lsp_client` package repo (not the full
   krom app). Bootstrap source lives in `docs/dart_lsp_client-bootstrap/` if needed.
+- Pre-existing failures unrelated to the environment (do NOT "fix" as setup work):
+  `flutter test` fails the `widget_test.dart` "App boots" case with a `RenderFlex
+  overflowed` layout assertion from `lib/frontends/ide_concepts/ide_concepts_page.dart`
+  (9 sub-assertions pass, 1 fails). `flutter analyze` also reports errors in the
+  vendored `docs/dart_lsp_client-bootstrap/test/` copy (`throwsA`/`anything`
+  undefined) plus assorted `unused_*` warnings; the app under `lib/` itself builds
+  and runs fine.
